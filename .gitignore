@@ -1,0 +1,15 @@
+**/xcuserdata/
+**/*.xcuserstate
+**/*.xcuserdatad/
+
+build/
+DerivedData/
+
+.swiftpm/
+.build/
+Package.resolved
+
+.DS_Store
+
+*.log
+*.tmp
