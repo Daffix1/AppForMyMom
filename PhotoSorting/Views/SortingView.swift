@@ -97,7 +97,7 @@ struct SortingView: View {
         VStack(spacing: 0) {
             VStack(spacing: 10) {
                 HStack(spacing: 12) {
-                    // кнопка "Назад"
+                    // Кнопка "Назад" (отмена последнего свайпа)
                     Button {
                         undoLastSwipe()
                     } label: {
@@ -111,6 +111,19 @@ struct SortingView: View {
                     .disabled(swipeHistory.isEmpty)
                     
                     progressBar
+                    
+                    // Кнопка "X" — выход из сортировки с сохранением прогресса
+                    Button {
+                        HapticsService.shared.play(.light)
+                        onFinish()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.gray)
+                            .frame(width: 36, height: 36)
+                            .background(Color(.secondarySystemGroupedBackground))
+                            .clipShape(Circle())
+                    }
                 }
                 
                 // Подсказка про стрик
