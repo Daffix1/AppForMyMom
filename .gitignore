@@ -10,6 +10,7 @@ DerivedData/
 Package.resolved
 
 .DS_Store
+**/.DS_Store
 
 *.log
 *.tmp
