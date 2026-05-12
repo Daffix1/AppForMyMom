@@ -20,6 +20,10 @@ struct SortingView: View {
     
     // Анимационные переменные
     @State private var dragOffset: CGFloat = 0
+    @State private var pinchScale: CGFloat = 1.0
+    @State private var pinchAnchor: UnitPoint = .center
+    @State private var panOffset: CGSize = .zero
+    @State private var isZooming: Bool = false
     @State private var sessionFinished = false
     @State private var showStreakAchieved = false
     
@@ -147,32 +151,57 @@ struct SortingView: View {
             .animation(.spring(response: 0.4), value: session.totalProcessedToday)
             
             Spacer()
-            
-            // Фото + жесты + надписи
-            ZStack {
-                behindCardLabels
-                PhotoCardView(
-                    item: photos[currentIndex],
-                    offset: dragOffset,
-                    onSkip: {
-                        performSwipe(direction: .right)
-                    }
+            GeometryReader { geometry in
+                ZStack {
+                    behindCardLabels
+                    PhotoCardView(
+                        item: photos[currentIndex],
+                        offset: dragOffset,
+                        onSkip: {
+                            performSwipe(direction: .right)
+                        },
+                        pinchScale: $pinchScale,
+                        pinchAnchor: $pinchAnchor,
+                        panOffset: $panOffset
+                    )
+                    .id(currentIndex)
+                    .animation(.interactiveSpring(), value: dragOffset)
+                    
+                    // Invisible overlay that catches pinch + pan gestures
+                    // Only intercepts touches when needed (configured by isMultipleTouchEnabled)
+                    // The overlay is on TOP of the photo so it gets first dibs on touches
+                    ZoomGestureOverlay(
+                        scale: $pinchScale,
+                        offset: $panOffset,
+                        anchor: $pinchAnchor,  // NEW
+                        isZooming: $isZooming,
+                        onZoomEnd: {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                pinchScale = 1.0
+                                panOffset = .zero
+                                // Note: we don't reset pinchAnchor — it'll be overwritten
+                                // the next time a pinch begins. Leaving it where it was is fine.
+                            }
+                        }
+                    )
+                    .allowsHitTesting(true)  // overlay catches gestures
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            // Block swipe-delete the moment zoom activates
+                            guard pinchScale == 1.0 else { return }
+                            dragOffset = value.translation.width
+                        }
+                        .onEnded { value in
+                            guard pinchScale == 1.0 else { return }
+                            handleSwipeEnd(translation: value.translation.width)
+                        }
                 )
-                .id(currentIndex)
-                .animation(.interactiveSpring(), value: dragOffset)
+                .padding(.horizontal, 20)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Rectangle()) // чтобы свайп работал не только на фото, но и на пустое пространство над и под ним
-            .gesture(
-                DragGesture()
-                    .onChanged { value in
-                        dragOffset = value.translation.width
-                    }
-                    .onEnded { value in
-                        handleSwipeEnd(translation: value.translation.width)
-                    }
-            )
-            .padding(.horizontal, 20)
             
             Text(photos[currentIndex].creationDate.formatted(date: .long, time: .omitted))
                 .font(.system(size: 15, weight: .medium))
@@ -182,6 +211,7 @@ struct SortingView: View {
             Spacer()
         }
     }
+    
     
     // MARK: - Прогресс-бар
     
