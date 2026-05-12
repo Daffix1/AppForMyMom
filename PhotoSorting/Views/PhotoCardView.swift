@@ -4,7 +4,11 @@ import Photos
 struct PhotoCardView: View {
     let item: PhotoItem
     let offset: CGFloat
-    let onSkip: () -> Void  // вызывается при нажатии кнопки таймаута
+    let onSkip: () -> Void
+    
+    @Binding var pinchScale: CGFloat
+    @Binding var pinchAnchor: UnitPoint  // NEW
+    @Binding var panOffset: CGSize
 
     var body: some View {
         Group {
@@ -14,6 +18,10 @@ struct PhotoCardView: View {
                 PhotoImageView(asset: item.asset, onSkip: onSkip)
                     .scaledToFit()
                     .clipShape(RoundedRectangle(cornerRadius: 20))
+                    // Scale around the anchor point captured at pinch start
+                    .scaleEffect(pinchScale, anchor: pinchAnchor)
+                    // Then translate based on pan
+                    .offset(panOffset)
             }
         }
         .rotationEffect(.degrees(Double(offset) / 20))

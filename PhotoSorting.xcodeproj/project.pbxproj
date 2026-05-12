@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		3B8C73992FACCB9A00F8BD55 /* AppButtons.swift .swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B8C73982FACCB9A00F8BD55 /* AppButtons.swift .swift */; };
 		3B8C739C2FACF2C000F8BD55 /* IntExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B8C739B2FACF2C000F8BD55 /* IntExtensions.swift */; };
+		3B942A992FB35AE30094B383 /* ZoomGestureOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B942A982FB35AE30094B383 /* ZoomGestureOverlay.swift */; };
 		3BADCD612FA7580E003DDB45 /* PhotoSortingApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BADCD602FA7580E003DDB45 /* PhotoSortingApp.swift */; };
 		3BADCD632FA7580E003DDB45 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BADCD622FA7580E003DDB45 /* ContentView.swift */; };
 		3BADCD652FA75815003DDB45 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3BADCD642FA75815003DDB45 /* Assets.xcassets */; };
@@ -31,6 +32,7 @@
 /* Begin PBXFileReference section */
 		3B8C73982FACCB9A00F8BD55 /* AppButtons.swift .swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppButtons.swift .swift"; sourceTree = "<group>"; };
 		3B8C739B2FACF2C000F8BD55 /* IntExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntExtensions.swift; sourceTree = "<group>"; };
+		3B942A982FB35AE30094B383 /* ZoomGestureOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoomGestureOverlay.swift; sourceTree = "<group>"; };
 		3BADCD5D2FA7580E003DDB45 /* PhotoSorting.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PhotoSorting.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3BADCD602FA7580E003DDB45 /* PhotoSortingApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoSortingApp.swift; sourceTree = "<group>"; };
 		3BADCD622FA7580E003DDB45 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -121,6 +123,7 @@
 				3BADCD822FA7A5CD003DDB45 /* StatsView.swift */,
 				3BADCD842FA7A742003DDB45 /* OnboardingView.swift */,
 				3BADCD862FA7AE14003DDB45 /* SettingsView.swift */,
+				3B942A982FB35AE30094B383 /* ZoomGestureOverlay.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -229,6 +232,7 @@
 				3BADCD892FA7AEF4003DDB45 /* HapticsService.swift in Sources */,
 				3B8C739C2FACF2C000F8BD55 /* IntExtensions.swift in Sources */,
 				3BADCD8B2FA8D040003DDB45 /* PhotoCacheService.swift in Sources */,
+				3B942A992FB35AE30094B383 /* ZoomGestureOverlay.swift in Sources */,
 				3BADCD632FA7580E003DDB45 /* ContentView.swift in Sources */,
 				3BADCD612FA7580E003DDB45 /* PhotoSortingApp.swift in Sources */,
 				3BADCD832FA7A5CD003DDB45 /* StatsView.swift in Sources */,
