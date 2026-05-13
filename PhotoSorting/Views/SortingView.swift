@@ -67,12 +67,27 @@ struct SortingView: View {
                 storage.currentSession = session
             }
             preloadNextPhotos()
+            prepareHaptics()
         }
         .task(id: sessionFinished) {
             if sessionFinished {
                 remainingPhotos = await calculateRemaining()
             }
         }
+    }
+    
+    private func prepareHaptics() {
+        // Warm up the haptic engines so the first swipe feels instant.
+        // Without this, the first .medium haptic call has a noticeable delay
+        // because iOS has to power up the Taptic Engine.
+        let medium = UIImpactFeedbackGenerator(style: .medium)
+        medium.prepare()
+        
+        let light = UIImpactFeedbackGenerator(style: .light)
+        light.prepare()
+        
+        let notification = UINotificationFeedbackGenerator()
+        notification.prepare()
     }
     
     // MARK: - Основной контент
@@ -342,54 +357,60 @@ struct SortingView: View {
     
     private func performSwipe(direction: SwipeDirection) {
         let photo = photos[currentIndex]
+        
+        // STEP 1: Start the visual animation IMMEDIATELY.
+        // Nothing here can block the main thread for long — no disk writes,
+        // no JSON encoding. The user sees the card fly away instantly.
         HapticsService.shared.play(.medium)
         
-        // добавляем в массив свайпов сделанный свайп для кнопки "назад"
         swipeHistory.append(direction)
         
-        if direction == .left {
-            session.pendingDeleteIDs.append(photo.id) // массив фоток, которые потом удалим до конца
-            session.currentDeletedIDs.append(photo.id) // массив фоток для счетчика наверху
-        } else {
-            session.currentKeptIDs.append(photo.id)
-        }
-        
-        session.processedIDs.insert(photo.id) // множество для минимума стрика и фильтрации
-        
-        // Сохраняем в storage если приложение крашнется или юзер выйдет из него
-        storage.currentSession = session
-        
-        // Глобальный список тоже обновляем
-        var sorted = storage.sortedPhotoIDs
-        sorted.insert(photo.id)
-        storage.sortedPhotoIDs = sorted
-        
-        // Проверка стрика
-        let reachedMinimum = session.totalProcessedToday >= StorageService.dailyMinimum
-        let isLastPhoto = currentIndex + 1 >= photos.count
-        
-        if (reachedMinimum || isLastPhoto) && !storage.todayStreakReached {
-            storage.updateStreak()
-            HapticsService.shared.play(.success)
-            
-            withAnimation(.spring(response: 0.4)) {
-                showStreakAchieved = true
-            }
-            // скрытие поздравшки с закрытием стрика
-            Task {
-                try? await Task.sleep(for: .seconds(streakOverlayDuration))
-                withAnimation(.easeOut(duration: streakOverlayFadeOut)) {
-                    showStreakAchieved = false
-                }
-            }
-        }
-        
-        // Анимация улёта карточки
         withAnimation(.easeOut(duration: swipeAnimationDuration)) {
             dragOffset = direction == .left ? -cardFlyOutDistance : cardFlyOutDistance
         }
-
+        
+        // STEP 2: Do the heavy work asynchronously.
+        // Storage writes (UserDefaults JSON encoding), streak logic, etc.
+        // run on a background task so they don't block the animation.
         Task {
+            // Mutate the local copy of the session
+            if direction == .left {
+                session.pendingDeleteIDs.append(photo.id)
+                session.currentDeletedIDs.append(photo.id)
+            } else {
+                session.currentKeptIDs.append(photo.id)
+            }
+            session.processedIDs.insert(photo.id)
+            
+            // Storage writes (these trigger UserDefaults I/O)
+            storage.currentSession = session
+            
+            var sorted = storage.sortedPhotoIDs
+            sorted.insert(photo.id)
+            storage.sortedPhotoIDs = sorted
+            
+            // Streak check
+            let reachedMinimum = session.totalProcessedToday >= StorageService.dailyMinimum
+            let isLastPhoto = currentIndex + 1 >= photos.count
+            
+            if (reachedMinimum || isLastPhoto) && !storage.todayStreakReached {
+                storage.updateStreak()
+                HapticsService.shared.play(.success)
+                
+                withAnimation(.spring(response: 0.4)) {
+                    showStreakAchieved = true
+                }
+                
+                Task {
+                    try? await Task.sleep(for: .seconds(streakOverlayDuration))
+                    withAnimation(.easeOut(duration: streakOverlayFadeOut)) {
+                        showStreakAchieved = false
+                    }
+                }
+            }
+            
+            // STEP 3: Wait for the fly-out animation to mostly finish,
+            // then show the next card.
             try? await Task.sleep(for: .seconds(nextCardDelay))
             currentIndex += 1
             dragOffset = 0

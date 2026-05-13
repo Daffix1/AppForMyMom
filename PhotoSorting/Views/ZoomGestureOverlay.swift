@@ -172,5 +172,22 @@ struct ZoomGestureOverlay: UIViewRepresentable {
         ) -> Bool {
             return true
         }
+        // Decide if a gesture recognizer should activate at all.
+        // Critical: when zoom is NOT active, the pan recognizer must bow out
+        // so the SwiftUI swipe-to-delete drag can take the touch instead.
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            // Always allow pinch to begin — it requires 2 fingers, which is unambiguous
+            if gestureRecognizer === pinchRecognizer {
+                return true
+            }
+            
+            // For pan: only allow it to begin if zoom is currently active
+            // (i.e., scale > 1.0). Otherwise, let SwiftUI's DragGesture handle the touch.
+            if gestureRecognizer === panRecognizer {
+                return parent.scale > 1.0
+            }
+            
+            return true
+        }
     }
 }

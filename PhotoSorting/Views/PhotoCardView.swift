@@ -36,10 +36,10 @@ struct PhotoImageView: View {
     @State private var loadingState: LoadingState = .silent
 
     private enum LoadingState {
-        case silent      // < 2 секунд — только спиннер
-        case generic     // > 2 секунд — "Загружаем фото..."
-        case fromICloud  // обнаружили iCloud — "Загружаем из iCloud..."
-        case timedOut    // 15 секунд без ответа — показываем кнопку
+        case silent
+        case generic
+        case fromICloud
+        case timedOut
     }
 
     var body: some View {
@@ -109,31 +109,42 @@ struct PhotoImageView: View {
     // MARK: - Загрузка
 
     private func loadImage() async {
-        let scale = await UIScreen.main.scale
-        let size = CGSize(width: 360 * scale, height: 540 * scale)
+            let scale = await UIScreen.main.scale
+            let size = CGSize(width: 360 * scale, height: 540 * scale)
 
-        // 2-секундный таймер для generic-текста
-        let textTimerTask = Task {
-            try? await Task.sleep(for: .seconds(2))
-            if !Task.isCancelled, image == nil, loadingState == .silent {
-                loadingState = .generic
+            let textTimerTask = Task {
+                try? await Task.sleep(for: .seconds(2))
+                if !Task.isCancelled, image == nil, loadingState == .silent {
+                    loadingState = .generic
+                }
             }
-        }
 
-        image = await PhotoLibraryService.shared.loadImage(
-            for: asset,
-            targetSize: size,
-            deliveryMode: .opportunistic,
-            onICloudProgress: { _ in
-                loadingState = .fromICloud
+            // Pass an onPreview callback so we show the low-quality version
+            // immediately while the high-quality version is still loading
+            let finalImage = await PhotoLibraryService.shared.loadImage(
+                for: asset,
+                targetSize: size,
+                deliveryMode: .opportunistic,
+                onICloudProgress: { _ in
+                    loadingState = .fromICloud
+                },
+                onPreview: { preview in
+                    // Only set if we don't have anything yet
+                    // (avoids replacing a higher quality image with a preview)
+                    if image == nil {
+                        image = preview
+                    }
+                }
+            )
+
+            textTimerTask.cancel()
+
+            if let finalImage {
+                // High-quality version replaces the preview
+                image = finalImage
+            } else if image == nil {
+                // Nothing loaded at all — timeout state
+                loadingState = .timedOut
             }
-        )
-
-        textTimerTask.cancel()
-
-        // loadImage вернул nil — значит сработал таймаут (15 секунд)
-        if image == nil {
-            loadingState = .timedOut
         }
     }
-}

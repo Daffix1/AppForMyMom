@@ -150,16 +150,17 @@ final class PhotoLibraryService {
         for asset: PHAsset,
         targetSize: CGSize,
         deliveryMode: PHImageRequestOptionsDeliveryMode,
-        onICloudProgress: (@Sendable (Double) -> Void)? = nil
+        onICloudProgress: (@Sendable (Double) -> Void)? = nil,
+        onPreview: (@Sendable (UIImage) -> Void)? = nil  // NEW
     ) async -> UIImage? {
         let id = asset.localIdentifier
 
-        // 1. Проверяем кэш
+        // 1. Check cache
         if let cached = PhotoCacheService.shared.cachedImage(for: id) {
             return cached
         }
 
-        // 2. Готовим параметры запроса
+        // 2. Set up options
         let options = PHImageRequestOptions()
         options.deliveryMode = deliveryMode
         options.resizeMode = .fast
@@ -173,13 +174,10 @@ final class PhotoLibraryService {
             }
         }
 
-        // 3. Оборачиваем callback в async.
-        // didResume защищает от двойного resume (opportunistic даёт 2+ колбэка).
-        // Таймаут защищает от утечки если PHImageManager никогда не ответит.
+        // 3. Async wrapper
         let image: UIImage? = await withCheckedContinuation { continuation in
             var didResume = false
 
-            // Таймаут — через 15 секунд форсируем resume с nil
             let timeoutTask = Task {
                 try? await Task.sleep(for: .seconds(15))
                 guard !didResume else { return }
@@ -194,7 +192,17 @@ final class PhotoLibraryService {
                 options: options
             ) { img, info in
                 let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-                if isDegraded { return }
+                
+                if isDegraded {
+                    // Deliver the preview to the caller immediately
+                    // but don't resume the continuation — wait for the full image
+                    if let img, let onPreview {
+                        Task { @MainActor in
+                            onPreview(img)
+                        }
+                    }
+                    return
+                }
 
                 guard !didResume else { return }
                 didResume = true
@@ -203,7 +211,7 @@ final class PhotoLibraryService {
             }
         }
 
-        // 4. Кэшируем только если получили реальное изображение
+        // 4. Cache the final result
         if let image {
             PhotoCacheService.shared.cacheImage(image, for: id)
         }
