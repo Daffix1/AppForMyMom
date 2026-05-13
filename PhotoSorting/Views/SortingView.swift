@@ -180,31 +180,28 @@ struct SortingView: View {
                     .id(currentIndex)
                     .animation(.interactiveSpring(), value: dragOffset)
                     
-                    // Invisible overlay that catches pinch + pan gestures
-                    // Only intercepts touches when needed (configured by isMultipleTouchEnabled)
-                    // The overlay is on TOP of the photo so it gets first dibs on touches
-                    ZoomGestureOverlay(
-                        scale: $pinchScale,
-                        offset: $panOffset,
-                        anchor: $pinchAnchor,  // NEW
-                        isZooming: $isZooming,
-                        onZoomEnd: {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                pinchScale = 1.0
-                                panOffset = .zero
-                                // Note: we don't reset pinchAnchor — it'll be overwritten
-                                // the next time a pinch begins. Leaving it where it was is fine.
+                    // Show zoom overlay only for photos, not videos
+                    // Videos have their own controls (play, slider) that need touch access
+                    if photos[currentIndex].asset.mediaType != .video {
+                        ZoomGestureOverlay(
+                            scale: $pinchScale,
+                            offset: $panOffset,
+                            anchor: $pinchAnchor,
+                            isZooming: $isZooming,
+                            onZoomEnd: {
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    pinchScale = 1.0
+                                    panOffset = .zero
+                                }
                             }
-                        }
-                    )
-                    .allowsHitTesting(true)  // overlay catches gestures
+                        )
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
                 .gesture(
                     DragGesture()
                         .onChanged { value in
-                            // Block swipe-delete the moment zoom activates
                             guard pinchScale == 1.0 else { return }
                             dragOffset = value.translation.width
                         }
