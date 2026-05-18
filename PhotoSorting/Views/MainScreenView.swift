@@ -7,12 +7,20 @@ struct MainScreenView: View {
     
     @State private var state: ScreenState = .loading
     @State private var photos: [PhotoItem] = []
+    @State private var sortingPayload: SortingSessionPayload?
     
-    @State private var showSorting = false
     @State private var showStats = false
     @State private var showSettings = false
     
     @State private var autoStartAfterDismiss = false
+    
+    // Wrapper for the data fullScreenCover(item:) hands off to SortingView.
+    // Using item: instead of isPresented: guarantees SwiftUI has the full
+    // payload in place before it constructs the SortingView body.
+    private struct SortingSessionPayload: Identifiable {
+        let id = UUID()
+        let photos: [PhotoItem]
+    }
     
     // Прямой доступ к реактивному singleton'у
     private let storage = StorageService.shared
@@ -70,23 +78,23 @@ struct MainScreenView: View {
         .task {
             await loadPhotos()
         }
-        .fullScreenCover(isPresented: $showSorting, onDismiss: {
+        .fullScreenCover(item: $sortingPayload, onDismiss: {
             Task {
                 await loadPhotos()
                 if autoStartAfterDismiss {
                     autoStartAfterDismiss = false
                     if state == .ready {
-                        showSorting = true
+                        await startSorting()
                     }
                 }
             }
-        }) {
+        }) { payload in
             SortingView(
-                photos: photos,
-                onFinish: { showSorting = false },
+                photos: payload.photos,
+                onFinish: { sortingPayload = nil },
                 onContinueRequested: {
                     autoStartAfterDismiss = true
-                    showSorting = false
+                    sortingPayload = nil
                 }
             )
         }
@@ -191,7 +199,7 @@ struct MainScreenView: View {
             }
             
             Button(buttonTitleForReady) {
-                showSorting = true
+                Task { await startSorting() }
             }
             .primaryButtonStyle()
         }
@@ -234,7 +242,7 @@ struct MainScreenView: View {
             
             if !photos.isEmpty {
                 Button("Отсортировать оставшееся") {
-                    showSorting = true
+                    Task { await startSorting() }
                 }
                 .primaryButtonStyle()
                 .padding(.horizontal, 20)
@@ -284,6 +292,14 @@ struct MainScreenView: View {
         } else {
             state = .ready
         }
+    }
+    
+    private func startSorting() async {
+        let sessionDate = storage.currentSession.date
+        let photos = await photoService.fetchAllPhotos(for: sessionDate)
+        // Setting this single piece of state both triggers the cover AND
+        // hands SwiftUI the photos array atomically.
+        sortingPayload = SortingSessionPayload(photos: photos)
     }
     
     // MARK: - Прочее

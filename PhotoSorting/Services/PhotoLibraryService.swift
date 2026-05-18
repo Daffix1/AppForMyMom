@@ -138,6 +138,74 @@ final class PhotoLibraryService {
         return result
     }
     
+    // MARK: - Поиск фото для конкретной даты (без фильтрации по обработанным)
+
+    // Возвращает ВСЕ фото за "этот день прошлых лет" для указанной даты,
+    // включая уже отсортированные. В отличие от fetchPhotosForToday не
+    // исключает ничего из storage.sortedPhotoIDs.
+    //
+    // Используется в SortingView чтобы:
+    //   1. Знать полное количество фото за день (для прогресс-бара).
+    //   2. Восстанавливать currentIndex по swipeLog после переоткрытия.
+    //   3. Дать кнопке "назад" доступ к уже свайпнутым фото.
+    //
+    // Параметр date — любой день (сегодня или из календаря в будущем).
+    func fetchAllPhotos(for date: Date) async -> [PhotoItem] {
+        let calendar = Calendar.current
+        
+        let month = calendar.component(.month, from: date)
+        let day = calendar.component(.day, from: date)
+        let currentYear = calendar.component(.year, from: Date())
+        
+        // Собираем интервалы дат для каждого года
+        var dateRanges: [NSPredicate] = []
+        
+        for year in (currentYear - yearsBack)...currentYear {
+            var components = DateComponents()
+            components.year = year
+            components.month = month
+            components.day = day
+            components.hour = 0
+            components.minute = 0
+            components.second = 0
+            
+            guard let startDate = calendar.date(from: components) else { continue }
+            guard let endDate = calendar.date(byAdding: .day, value: 1, to: startDate) else { continue }
+            
+            let predicate = NSPredicate(
+                format: "creationDate >= %@ AND creationDate < %@",
+                startDate as NSDate,
+                endDate as NSDate
+            )
+            dateRanges.append(predicate)
+        }
+        
+        let compoundPredicate = NSCompoundPredicate(orPredicateWithSubpredicates: dateRanges)
+        
+        let fetchOptions = PHFetchOptions()
+        fetchOptions.predicate = compoundPredicate
+        fetchOptions.sortDescriptors = [
+            NSSortDescriptor(key: "creationDate", ascending: false)
+        ]
+        
+        let assets = PHAsset.fetchAssets(with: fetchOptions)
+        
+        var result: [PhotoItem] = []
+        
+        assets.enumerateObjects { asset, _, _ in
+            guard let creationDate = asset.creationDate else { return }
+            
+            let item = PhotoItem(
+                id: asset.localIdentifier,
+                asset: asset,
+                creationDate: creationDate
+            )
+            result.append(item)
+        }
+        
+        return result
+    }
+    
     // MARK: - Загрузка изображения (async с кэшем)
 
     // Async-версия loadImage с интеграцией кэша.

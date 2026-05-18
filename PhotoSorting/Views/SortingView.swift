@@ -60,12 +60,12 @@ struct SortingView: View {
             }
         }
         .onAppear {
-            // Загружаем свежую копию сессии
             session = storage.currentSession
             if session.phase == .idle {
                 session.phase = .sorting
                 storage.currentSession = session
             }
+            reconstructStateFromLog()
             preloadNextPhotos()
             prepareHaptics()
         }
@@ -382,6 +382,15 @@ struct SortingView: View {
             }
             session.processedIDs.insert(photo.id)
             
+            // Записываем свайп в журнал. swipeLog — это упорядоченная история
+            // свайпов за сессию; используется при переоткрытии SortingView для
+            // восстановления currentIndex и swipeHistory (см. reconstructStateFromLog).
+            let entryDirection: DailySessionState.SwipeEntry.Direction =
+                direction == .left ? .left : .right
+            session.swipeLog.append(
+                DailySessionState.SwipeEntry(photoID: photo.id, direction: entryDirection)
+            )
+            
             // Storage writes (these trigger UserDefaults I/O)
             storage.currentSession = session
             
@@ -458,6 +467,13 @@ struct SortingView: View {
         }
         
         session.processedIDs.remove(photo.id)
+        
+        // Снимаем последнюю запись из журнала свайпов — он должен идти
+        // в ногу с swipeHistory и currentDeletedIDs/currentKeptIDs.
+        if !session.swipeLog.isEmpty {
+            session.swipeLog.removeLast()
+        }
+        
         storage.currentSession = session
         
         // Откат в глобальном списке
@@ -495,6 +511,40 @@ struct SortingView: View {
         }
     }
     
+    // MARK: - Восстановление состояния из swipeLog
+
+    // Вызывается при появлении SortingView. Смотрит на journal свайпов
+    // в session.swipeLog и приводит локальное состояние (currentIndex,
+    // swipeHistory) в соответствие.
+    //
+    // Зачем: после закрытия SortingView и повторного открытия @State
+    // сбрасывается — currentIndex становится 0, swipeHistory пустеет.
+    // Но в session.swipeLog хранится полная история свайпов за сессию.
+    // Этот метод "догоняет" локальное состояние до содержимого журнала.
+    private func reconstructStateFromLog() {
+        let log = session.swipeLog
+        guard !log.isEmpty else {
+            // Журнал пуст — новая или ни разу не свайпавшаяся сессия.
+            // Оставляем currentIndex = 0, swipeHistory = [].
+            return
+        }
+        
+        // На случай если какие-то фото из журнала больше не существуют
+        // (пользователь удалил через iOS Photos между сессиями), считаем
+        // только те записи, чьи photoID есть в текущем списке photos.
+        let existingIDs = Set(photos.map(\.id))
+        let validEntries = log.filter { existingIDs.contains($0.photoID) }
+        
+        // currentIndex — количество валидных свайпов. Следующий несвайпнутый
+        // фото находится в photos[validEntries.count] (если он существует).
+        currentIndex = validEntries.count
+        
+        // Восстанавливаем swipeHistory в том же порядке, что и в журнале —
+        // последний элемент = последний свайп = первый кандидат на undo.
+        swipeHistory = validEntries.map { entry in
+            entry.direction == .left ? .left : .right
+        }
+    }
    
     
     // MARK: - Действия с финального экрана
@@ -581,6 +631,7 @@ struct SortingView: View {
         session.pendingDeleteIDs = []
         session.currentDeletedIDs = []
         session.currentKeptIDs = []
+        session.swipeLog = []
     }
     
     // Меняет фазу сессии и сохраняет в storage
