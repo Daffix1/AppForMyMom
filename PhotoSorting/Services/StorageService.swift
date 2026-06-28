@@ -7,14 +7,14 @@ final class StorageService {
     static let shared = StorageService()
     
     private init() {
-        // Простые числовые
-        self.totalDeleted = defaults.integer(forKey: Keys.totalDeleted)
-        self.totalFreedBytes = (defaults.object(forKey: Keys.totalFreedBytes) as? Int64) ?? 0
-        self.currentStreak = defaults.integer(forKey: Keys.currentStreak)
-        self.onboardingCompleted = defaults.bool(forKey: Keys.onboardingCompleted)
+        // Счётчики «удалено» (фото/видео отдельно)
+        self.totalDeletedPhotos = defaults.integer(forKey: Keys.totalDeletedPhotos)
+        self.totalDeletedVideos = defaults.integer(forKey: Keys.totalDeletedVideos)
         
-        // Дата (опциональная)
-        self.lastStreakDate = defaults.object(forKey: Keys.lastStreakDate) as? Date
+        // Освобождённое место
+        self.totalFreedBytes = (defaults.object(forKey: Keys.totalFreedBytes) as? Int64) ?? 0
+        
+        self.onboardingCompleted = defaults.bool(forKey: Keys.onboardingCompleted)
         
         // Множество строк
         let array = defaults.stringArray(forKey: Keys.sortedPhotoIDs) ?? []
@@ -39,21 +39,23 @@ final class StorageService {
     @ObservationIgnored
     private let defaults = UserDefaults.standard // упрощаем обращение к встроенной бд
     
-    // MARK: - Минимум фото для засчитывания Стрика
+    // MARK: - Минимум фото за день
     
-    static let dailyMinimum = 30
+    // Порог нужен для будущей фичи «блокировка приложений, пока не выполнена
+    // дневная цель». После него на экране сортировки появляется кнопка
+    // «Завершить сортировку». Стрик к порогу больше не привязан.
+    static let dailyMinimum = 3
     
     // MARK: - Ключи
     
     private enum Keys {
-        // Статистика
+        // Пул необработанных
         static let sortedPhotoIDs = "sortedPhotoIDs"
-        static let totalDeleted = "totalDeleted"
-        static let totalFreedBytes = "totalFreedBytes"
         
-        // Стрик
-        static let currentStreak = "currentStreak"
-        static let lastStreakDate = "lastStreakDate"
+        // Статистика «удалено»
+        static let totalDeletedPhotos = "totalDeletedPhotos"
+        static let totalDeletedVideos = "totalDeletedVideos"
+        static let totalFreedBytes = "totalFreedBytes"
         
         // Настройки
         static let onboardingCompleted = "onboardingCompleted"
@@ -73,14 +75,25 @@ final class StorageService {
         }
     }
     
-    // MARK: - Статистика
+    // MARK: - Статистика: удалено
     
-    // Всего удалённых фото за всё время
-    var totalDeleted: Int {
+    // Сколько фото физически удалено за всё время
+    var totalDeletedPhotos: Int {
         didSet {
-            defaults.set(totalDeleted, forKey: Keys.totalDeleted)
+            defaults.set(totalDeletedPhotos, forKey: Keys.totalDeletedPhotos)
         }
     }
+    
+    // Сколько видео физически удалено за всё время
+    var totalDeletedVideos: Int {
+        didSet {
+            defaults.set(totalDeletedVideos, forKey: Keys.totalDeletedVideos)
+        }
+    }
+    
+    // Всего удалено = фото + видео.
+    // Вычисляемое: всегда сумма частей, рассогласовать нельзя.
+    var totalDeleted: Int { totalDeletedPhotos + totalDeletedVideos }
     
     // Освобождено байт за всё время (примерно)
     var totalFreedBytes: Int64 {
@@ -95,52 +108,6 @@ final class StorageService {
         didSet {
             defaults.set(Array(sortedPhotoIDs), forKey: Keys.sortedPhotoIDs)
         }
-    }
-    
-    // MARK: - Стрик
-    
-    var currentStreak: Int {
-        didSet {
-            defaults.set(currentStreak, forKey: Keys.currentStreak)
-        }
-    }
-    
-    private var lastStreakDate: Date? {
-        didSet {
-            defaults.set(lastStreakDate, forKey: Keys.lastStreakDate)
-        }
-    }
-    
-    // Засчитан ли стрик за сегодня
-    var todayStreakReached: Bool {
-        guard let date = lastStreakDate else { return false }
-        return Calendar.current.isDateInToday(date)
-    }
-    
-    // Сколько ещё нужно обработать фото для засчитывания стрика за сегодня
-    var photosRemainingForStreak: Int {
-        let needed = Self.dailyMinimum - currentSession.totalProcessedToday
-        return max(0, needed)
-    }
-    
-    // Засчитывает стрик за сегодня
-    func updateStreak() {
-        let calendar = Calendar.current
-        let today = Date()
-        
-        if let last = lastStreakDate { // если нет стрика, стрик = 1
-            if calendar.isDateInToday(last) { // есть стрик и он сегодняшний
-                return
-            } else if calendar.isDateInYesterday(last) { // есть стрик и он вчерашний
-                currentStreak += 1
-            } else {
-                currentStreak = 0
-            }
-        } else {
-            currentStreak = 1
-        }
-        
-        lastStreakDate = today
     }
     
     // MARK: - Настройки
@@ -174,20 +141,18 @@ final class StorageService {
     
     func resetAll() {
         defaults.removeObject(forKey: Keys.sortedPhotoIDs)
-        defaults.removeObject(forKey: Keys.totalDeleted)
+        defaults.removeObject(forKey: Keys.totalDeletedPhotos)
+        defaults.removeObject(forKey: Keys.totalDeletedVideos)
         defaults.removeObject(forKey: Keys.totalFreedBytes)
-        defaults.removeObject(forKey: Keys.currentStreak)
-        defaults.removeObject(forKey: Keys.lastStreakDate)
         defaults.removeObject(forKey: Keys.onboardingCompleted)
         defaults.removeObject(forKey: Keys.hapticsEnabled)
         defaults.removeObject(forKey: Keys.currentSession)
         
         // Обнуляем память
-        totalDeleted = 0
+        totalDeletedPhotos = 0
+        totalDeletedVideos = 0
         totalFreedBytes = 0
-        currentStreak = 0
         onboardingCompleted = false
-        lastStreakDate = nil
         sortedPhotoIDs = []
         currentSession = DailySessionState.newToday()
         hapticsEnabled = true

@@ -25,7 +25,6 @@ struct SortingView: View {
     @State private var panOffset: CGSize = .zero
     @State private var isZooming: Bool = false
     @State private var sessionFinished = false
-    @State private var showStreakAchieved = false
     
     // массив кейсов для кнопки "назад"
     @State private var swipeHistory: [SwipeDirection] = []
@@ -34,6 +33,11 @@ struct SortingView: View {
     // Сколько фото за сегодня осталось несвайпнутых
     // Считается при показе финального экрана
     @State private var remainingPhotos: Int = 0
+    
+    // Освобождаемое место (оценка) для финального экрана.
+    // Считается заранее, пока pendingDeleteIDs ещё указывают на существующие
+    // ассеты — после удаления PHAsset исчезает и размер не получить.
+    @State private var estimatedFreedBytes: Int64 = 0
     
     @State private var preloadTasks: [Task<Void, Never>] = []
     
@@ -45,8 +49,6 @@ struct SortingView: View {
     private let labelOpacityOffset: Double = 20   // сдвиг начала появления надписи
     private let swipeAnimationDuration: Double = 0.25  // длительность анимации улёта карточки
     private let nextCardDelay: Double = 0.3            // задержка перед показом следующей карточки
-    private let streakOverlayDuration: Double = 2.0    // сколько секунд показывается оверлей стрика
-    private let streakOverlayFadeOut: Double = 0.3     // длительность исчезновения оверлея
     private let preloadAheadCount: Int = 2             // сколько карточек предзагружать вперёд
     private let cardTargetWidth: CGFloat = 360         // ширина карточки для загрузки изображения
     private let cardTargetHeight: CGFloat = 540        // высота карточки для загрузки изображения
@@ -54,10 +56,6 @@ struct SortingView: View {
     var body: some View {
         ZStack {
             mainContent
-            if showStreakAchieved {
-                streakAchievedOverlay
-                    .transition(.scale.combined(with: .opacity))
-            }
         }
         .onAppear {
             session = storage.currentSession
@@ -72,6 +70,7 @@ struct SortingView: View {
         .task(id: sessionFinished) {
             if sessionFinished {
                 remainingPhotos = await calculateRemaining()
+                estimatedFreedBytes = estimatePendingFreedBytes()
             }
         }
     }
@@ -85,9 +84,6 @@ struct SortingView: View {
         
         let light = UIImpactFeedbackGenerator(style: .light)
         light.prepare()
-        
-        let notification = UINotificationFeedbackGenerator()
-        notification.prepare()
     }
     
     // MARK: - Основной контент
@@ -138,19 +134,6 @@ struct SortingView: View {
                             .frame(width: 36, height: 36)
                             .background(Color(.secondarySystemGroupedBackground))
                             .clipShape(Circle())
-                    }
-                }
-                
-                // Подсказка про стрик
-                if !storage.todayStreakReached {
-                    let remaining = storage.photosRemainingForStreak
-                    if remaining > 0 {
-                        HStack {
-                            Text("🔥 Ещё \(remaining) до серии")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.orange)
-                            Spacer()
-                        }
                     }
                 }
                 
@@ -294,31 +277,6 @@ struct SortingView: View {
         }
     }
     
-    // MARK: - Оверлей "Серия засчитана"
-    
-    private var streakAchievedOverlay: some View {
-        ZStack {
-            Color.black.opacity(0.4).ignoresSafeArea()
-            
-            VStack(spacing: 16) {
-                Text("🔥").font(.system(size: 80))
-                Text("Серия дней засчитана!")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundColor(.white)
-                Text("\(storage.currentStreak) дней подряд")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.white.opacity(0.9))
-            }
-            .padding(40)
-            .background(
-                RoundedRectangle(cornerRadius: 24)
-                    .fill(Color.orange.opacity(0.95))
-                    .shadow(color: .black.opacity(0.3), radius: 20)
-            )
-            .padding(40)
-        }
-    }
-    
     // MARK: - Финальный экран сортировки
         
     private var sessionFinishedView: some View {
@@ -326,6 +284,7 @@ struct SortingView: View {
             deletedCount: session.deletedCount,
             keptCount: session.keptCount,
             remainingCount: remainingPhotos,
+            estimatedFreedBytes: estimatedFreedBytes,
             onDeleteAndExit: {
                 Task { await deleteAndExit() }
             },
@@ -370,8 +329,8 @@ struct SortingView: View {
         }
         
         // STEP 2: Do the heavy work asynchronously.
-        // Storage writes (UserDefaults JSON encoding), streak logic, etc.
-        // run on a background task so they don't block the animation.
+        // Storage writes (UserDefaults JSON encoding) run on a background task
+        // so they don't block the animation.
         Task {
             // Mutate the local copy of the session
             if direction == .left {
@@ -397,26 +356,6 @@ struct SortingView: View {
             var sorted = storage.sortedPhotoIDs
             sorted.insert(photo.id)
             storage.sortedPhotoIDs = sorted
-            
-            // Streak check
-            let reachedMinimum = session.totalProcessedToday >= StorageService.dailyMinimum
-            let isLastPhoto = currentIndex + 1 >= photos.count
-            
-            if (reachedMinimum || isLastPhoto) && !storage.todayStreakReached {
-                storage.updateStreak()
-                HapticsService.shared.play(.success)
-                
-                withAnimation(.spring(response: 0.4)) {
-                    showStreakAchieved = true
-                }
-                
-                Task {
-                    try? await Task.sleep(for: .seconds(streakOverlayDuration))
-                    withAnimation(.easeOut(duration: streakOverlayFadeOut)) {
-                        showStreakAchieved = false
-                    }
-                }
-            }
             
             // STEP 3: Wait for the fly-out animation to mostly finish,
             // then show the next card.
@@ -593,15 +532,24 @@ struct SortingView: View {
         let assetsToDelete = pendingAssets()
         guard !assetsToDelete.isEmpty else { return true }
         
-        // Считаем размер ДО удаления — после удаления PHAsset исчезает
-        let freedBytes = assetsToDelete.reduce(Int64(0)) { sum, asset in
-            sum + PhotoLibraryService.estimateSize(for: asset)
+        // Считаем размер и тип ДО удаления — после удаления PHAsset исчезает
+        var freedBytes: Int64 = 0
+        var deletedPhotos = 0
+        var deletedVideos = 0
+        for asset in assetsToDelete {
+            freedBytes += PhotoLibraryService.estimateSize(for: asset)
+            if asset.mediaType == .video {
+                deletedVideos += 1
+            } else {
+                deletedPhotos += 1
+            }
         }
         
         let success = await photoService.deletePhotos(assetsToDelete)
         guard success else { return false }
         
-        storage.totalDeleted += session.deletedCount
+        storage.totalDeletedPhotos += deletedPhotos
+        storage.totalDeletedVideos += deletedVideos
         storage.totalFreedBytes += freedBytes
         
         return true
@@ -652,6 +600,15 @@ struct SortingView: View {
         }
         return assets
     }
+    
+    // Оценивает освобождаемое место по pendingDeleteIDs (до фактического удаления).
+    // Показывается на финальном экране.
+    private func estimatePendingFreedBytes() -> Int64 {
+        let assets = pendingAssets()
+        return assets.reduce(Int64(0)) { sum, asset in
+            sum + PhotoLibraryService.estimateSize(for: asset)
+        }
+    }
         
     // Сколько фото за сегодня ещё несвайпнуты
     private func calculateRemaining() async -> Int {
@@ -666,6 +623,7 @@ struct SessionFinishedView: View {
     let deletedCount: Int
     let keptCount: Int
     let remainingCount: Int
+    let estimatedFreedBytes: Int64
     
     let onDeleteAndExit: () -> Void
     let onContinueWithRemaining: () -> Void
@@ -679,60 +637,156 @@ struct SessionFinishedView: View {
     private var hasKept: Bool { keptCount > 0 }
     
     var body: some View {
-        VStack(spacing: 24) {
-            Text("🎉").font(.system(size: 80))
+        VStack(spacing: 20) {
+            // Спокойный заголовок с галочкой вместо 🎉
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 56))
+                .foregroundColor(.green)
             
-            Text("Сессия завершена!")
-                .font(.system(size: 28, weight: .bold))
+            Text("Сессия завершена")
+                .font(.system(size: 24, weight: .bold))
             
-            VStack(spacing: 12) {
-                Text("Удалено: \(deletedCount) фото")
-                    .font(.system(size: 18))
-                    .foregroundColor(.red)
-                Text("Оставлено: \(keptCount) фото")
-                    .font(.system(size: 18))
-                    .foregroundColor(.green)
+            // Главный мотиватор: освобождаемое место.
+            // Показываем только когда есть что удалять.
+            if hasDeletions {
+                freedSpaceBlock
             }
-            .padding(20)
-            .background(Color.gray.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
             
-            Spacer().frame(height: 8)
+            // Счётчики карточками
+            countCards
             
-            VStack(spacing: 12) {
-                if hasDeletions && hasKept {
-                    Button("Удалить \(deletedCount) фото в корзину") { onDeleteAndExit() }
-                        .destructiveButtonStyle()
-                    Button("Отсортировать остальное") { showContinueConfirm = true }
-                        .secondaryButtonStyle()
-                }
-                if hasDeletions && !hasKept {
-                    Button("Удалить \(deletedCount) фото в корзину") { onDeleteAndExit() }
-                        .destructiveButtonStyle()
-                }
-                if !hasDeletions && hasKept {
-                    Button("Завершить") { onExitWithoutDeleting() }
-                        .primaryButtonStyle()
-                }
-                
-                Button("Начать сортировку заново") {
-                    showStartOverConfirm = true
-                }
-                .plainDestructiveButtonStyle()
-            }
+            Spacer().frame(height: 4)
+            
+            // Кнопки действий
+            actionButtons
         }
-        .padding(40)
+        .padding(32)
         .alert("Начать сортировку заново?", isPresented: $showStartOverConfirm) {
             Button("Отмена", role: .cancel) {}
             Button("Да, начать заново", role: .destructive) { onStartOver() }
         } message: {
-            Text("Все ваши решения за эту сессию будут отменены. Фото вернутся в общий пул и нужно будет начать сортировку с самого начала.")
+            Text("Все ваши решения за эту сессию будут отменены. Файлы вернутся в общий пул и нужно будет начать сортировку с самого начала.")
         }
-        .alert("Удалить \(deletedCount) фото?", isPresented: $showContinueConfirm) {
+        .alert("Удалить \(deletedCount) \(deletedCount.fileWordFinal())?", isPresented: $showContinueConfirm) {
             Button("Отмена", role: .cancel) {}
             Button("Удалить и продолжить", role: .destructive) { onContinueWithRemaining() }
         } message: {
-            Text("Перед продолжением сортировки нужно удалить \(deletedCount) фото в корзину. Это действие нельзя отменить.")
+            Text("Перед продолжением сортировки нужно удалить \(deletedCount) \(deletedCount.fileWordFinal()) в корзину. Это действие нельзя отменить.")
+        }
+    }
+    
+    // MARK: - Блок освобождаемого места
+    
+    private var freedSpaceBlock: some View {
+        VStack(spacing: 2) {
+            Text("ОСВОБОДИТСЯ")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.green)
+            Text("~\(formattedFreedSpace)")
+                .font(.system(size: 30, weight: .bold))
+                .foregroundColor(.green)
+                .contentTransition(.numericText())
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+        .background(Color.green.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+    
+    // MARK: - Счётчики карточками
+    
+    private var countCards: some View {
+        HStack(spacing: 12) {
+            // Карточка «к удалению» — показываем если что-то удаляем
+            if hasDeletions {
+                countCard(value: deletedCount, label: "к удалению", color: .red)
+            }
+            // Карточка «оставлено» — показываем если что-то оставлено
+            if hasKept {
+                countCard(value: keptCount, label: "оставлено", color: .green)
+            }
+        }
+    }
+    
+    private func countCard(value: Int, label: String, color: Color) -> some View {
+        VStack(spacing: 4) {
+            Text("\(value)")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundColor(color)
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+    
+    // MARK: - Кнопки действий
+    
+    @ViewBuilder
+    private var actionButtons: some View {
+        VStack(spacing: 12) {
+            // Основное действие — всегда верхней кнопкой.
+            // Удаление всегда красное с корзиной; на его месте никогда
+            // не стоит безопасная кнопка.
+            if hasDeletions {
+                Button {
+                    onDeleteAndExit()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "trash")
+                        Text("Удалить \(deletedCount) \(deletedCount.fileWordFinal()) и выйти")
+                    }
+                }
+                .destructiveButtonStyle()
+                
+                // Вторичное: продолжить сортировку оставшихся
+                if hasKept {
+                    Button("Удалить и продолжить") { showContinueConfirm = true }
+                        .secondaryButtonStyle()
+                }
+            } else {
+                // Удалять нечего → нейтральное завершение на месте основного действия
+                Button("Готово") { onExitWithoutDeleting() }
+                    .primaryButtonStyle()
+            }
+            
+            // «Начать заново» — всегда последней тихой строкой
+            Button("Начать сортировку заново") {
+                showStartOverConfirm = true
+            }
+            .plainDestructiveButtonStyle()
+        }
+    }
+    
+    // MARK: - Форматирование места
+    
+    private var formattedFreedSpace: String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.countStyle = .file
+        formatter.includesUnit = true
+        formatter.includesCount = true
+        return formatter.string(fromByteCount: estimatedFreedBytes)
+    }
+}
+
+// MARK: - Склонение слова «файл» для финального экрана
+
+private extension Int {
+    func fileWordFinal() -> String {
+        let lastDigit = self % 10
+        let lastTwo = self % 100
+        
+        if lastTwo >= 11 && lastTwo <= 14 {
+            return "файлов"
+        }
+        switch lastDigit {
+        case 1: return "файл"
+        case 2, 3, 4: return "файла"
+        default: return "файлов"
         }
     }
 }

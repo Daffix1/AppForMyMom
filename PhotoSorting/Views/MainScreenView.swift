@@ -190,14 +190,6 @@ struct MainScreenView: View {
             
             Spacer()
             
-            // стрик над кнопкой
-            if !storage.todayStreakReached && storage.photosRemainingForStreak > 0 {
-                Text("🔥 Ещё \(storage.photosRemainingForStreak) фото до серии")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.orange)
-                    .padding(.bottom, 8)
-            }
-            
             Button(buttonTitleForReady) {
                 Task { await startSorting() }
             }
@@ -222,17 +214,6 @@ struct MainScreenView: View {
             
             Text("На сегодня всё!")
                 .font(.system(size: 26, weight: .bold))
-            
-            VStack(spacing: 6) {
-                Text("Серия дней подряд")
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
-                Text("\(storage.currentStreak) 🔥")
-                    .font(.system(size: 36, weight: .bold))
-            }
-            .padding(20)
-            .background(Color.gray.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
             
             Text("Возвращайтесь завтра в 00:00 за новой порцией фото")
                 .font(.system(size: 15))
@@ -282,9 +263,7 @@ struct MainScreenView: View {
         } else if session.phase == .awaitingDecision {
             state = .ready
         } else if foundPhotos.isEmpty {
-            if !storage.todayStreakReached {
-                storage.updateStreak()
-            }
+            // Фото за сегодня нет — помечаем день завершённым
             var updated = storage.currentSession
             updated.phase = .completed
             storage.currentSession = updated

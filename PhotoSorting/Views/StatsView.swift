@@ -1,26 +1,18 @@
 import SwiftUI
+import Charts   // Встроенный фреймворк Apple для графиков (iOS 16+)
 
 struct StatsView: View {
-    // Storage не привязан к @State — мы просто читаем из него один раз
+    // Читаем из реактивного singleton'а напрямую
     private let storage = StorageService.shared
     
-    // Закрывает экран статистики
-    // dismiss — встроенная функция SwiftUI для закрытия sheet
     @Environment(\.dismiss) private var dismiss
     
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 20) {
-                    // Большая цифра удалённых
-                    deletedHero
-                    
-                    // Освобождённое место
-                    freedSpaceCard
-                    
-                    // Streak
-                    streakCard
-                    
+                VStack(spacing: 16) {
+                    freedSpaceHero
+                    deletedCard
                     Spacer().frame(height: 20)
                 }
                 .padding(20)
@@ -30,146 +22,183 @@ struct StatsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Готово") {
-                        dismiss()
-                    }
+                    Button("Готово") { dismiss() }
                 }
             }
         }
     }
     
-    // MARK: - Большая цифра удалённых
+    // MARK: - Главный акцент: освобождённое место
     
-    private var deletedHero: some View {
-        VStack(spacing: 8) {
-            Text("Удалено всего")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.secondary)
+    private var freedSpaceHero: some View {
+        VStack(spacing: 2) {
+            Text("Освобождено места")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.green)
                 .textCase(.uppercase)
-            
-            Text("\(storage.totalDeleted)")
-                .font(.system(size: 72, weight: .bold))
-                .foregroundColor(.blue)
-                // contentTransition даёт плавную анимацию числа
-                // Если будем потом обновлять в реальном времени — оно будет красиво "перекатываться"
+            Text(formattedFreedSpace)
+                .font(.system(size: 40, weight: .bold))
+                .foregroundColor(.green)
                 .contentTransition(.numericText())
-            
-            Text(photoWord(storage.totalDeleted))
-                .font(.system(size: 14))
+            Text("примерно")
+                .font(.system(size: 12))
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 32)
-        .background(Color(.secondarySystemGroupedBackground))
+        .padding(.vertical, 28)
+        .background(Color.green.opacity(0.12))
         .clipShape(RoundedRectangle(cornerRadius: 20))
     }
     
-    // MARK: - Карточка освобождённого места
-
-    private var freedSpaceCard: some View {
-        HStack(spacing: 16) {
-            Text("💾")
-                .font(.system(size: 48))
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Освобождено места")
-                    .font(.system(size: 14, weight: .medium))
+    // MARK: - Блок «Удалено всего»
+    
+    private var deletedCard: some View {
+        VStack(spacing: 16) {
+            VStack(spacing: 2) {
+                Text("Удалено всего")
+                    .font(.system(size: 13))
                     .foregroundColor(.secondary)
-                    .textCase(.uppercase)
-                
-                Text(formattedFreedSpace)
-                    .font(.system(size: 32, weight: .bold))
-                
-                Text("примерно")
-                    .font(.system(size: 12))
+                Text("\(storage.totalDeleted)")
+                    .font(.system(size: 36, weight: .bold))
+                    .foregroundColor(.red)
+                    .contentTransition(.numericText())
+                Text(storage.totalDeleted.fileWord())
+                    .font(.system(size: 13))
                     .foregroundColor(.secondary)
             }
             
-            Spacer()
+            breakdownRow(
+                photos: storage.totalDeletedPhotos,
+                videos: storage.totalDeletedVideos,
+                photoColor: .red,
+                videoColor: .orange
+            )
         }
+        .frame(maxWidth: .infinity)
         .padding(20)
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 20))
     }
-
-    // Форматирует байты в красивую строку: "2.4 ГБ", "350 МБ", "0 КБ"
-    private var formattedFreedSpace: String {
-        let bytes = storage.totalFreedBytes
+    
+    // MARK: - Строка «диаграмма + легенда»
+    
+    @ViewBuilder
+    private func breakdownRow(
+        photos: Int,
+        videos: Int,
+        photoColor: Color,
+        videoColor: Color
+    ) -> some View {
+        let total = photos + videos
         
-        // ByteCountFormatter — встроенный в iOS форматтер
-        // Сам выбирает подходящие единицы (КБ/МБ/ГБ)
+        HStack(spacing: 20) {
+            donut(photos: photos, videos: videos,
+                  photoColor: photoColor, videoColor: videoColor)
+                .frame(width: 96, height: 96)
+            
+            VStack(alignment: .leading, spacing: 10) {
+                legendRow(color: photoColor, label: "Фото",
+                          count: photos, percent: percent(photos, of: total))
+                legendRow(color: videoColor, label: "Видео",
+                          count: videos, percent: percent(videos, of: total))
+            }
+            
+            Spacer()
+        }
+    }
+    
+    // MARK: - Кольцевая диаграмма (donut)
+    
+    @ViewBuilder
+    private func donut(
+        photos: Int,
+        videos: Int,
+        photoColor: Color,
+        videoColor: Color
+    ) -> some View {
+        let total = photos + videos
+        
+        if total == 0 {
+            // Пустое состояние — серое кольцо без данных
+            Circle()
+                .stroke(Color.gray.opacity(0.2), lineWidth: 18)
+                .padding(9)
+        } else {
+            Chart {
+                SectorMark(
+                    angle: .value("Фото", photos),
+                    innerRadius: .ratio(0.62),
+                    angularInset: 1.5
+                )
+                .foregroundStyle(photoColor)
+                
+                SectorMark(
+                    angle: .value("Видео", videos),
+                    innerRadius: .ratio(0.62),
+                    angularInset: 1.5
+                )
+                .foregroundStyle(videoColor)
+            }
+            .chartLegend(.hidden)
+        }
+    }
+    
+    // MARK: - Одна строка легенды
+    
+    private func legendRow(
+        color: Color,
+        label: String,
+        count: Int,
+        percent: Int
+    ) -> some View {
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(color)
+                .frame(width: 11, height: 11)
+            
+            VStack(alignment: .leading, spacing: 0) {
+                Text("\(count) \(label.lowercased())")
+                    .font(.system(size: 14, weight: .medium))
+                Text("\(percent)%")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+    
+    // MARK: - Освобождённое место (форматирование байтов)
+    
+    private var formattedFreedSpace: String {
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useKB, .useMB, .useGB]
         formatter.countStyle = .file
         formatter.includesUnit = true
         formatter.includesCount = true
-        
-        return formatter.string(fromByteCount: bytes)
+        return formatter.string(fromByteCount: storage.totalFreedBytes)
     }
     
-    // MARK: - Streak
+    // MARK: - Процент с защитой от деления на ноль
     
-    private var streakCard: some View {
-        HStack(spacing: 16) {
-            // Большой огонёк слева
-            Text("🔥")
-                .font(.system(size: 48))
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Серия дней")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.secondary)
-                    .textCase(.uppercase)
-                
-                Text("\(storage.currentStreak)")
-                    .font(.system(size: 32, weight: .bold))
-                
-                Text(streakSubtitle())
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary)
-            }
-            
-            Spacer()
-        }
-        .padding(20)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 20))
+    private func percent(_ part: Int, of total: Int) -> Int {
+        guard total > 0 else { return 0 }
+        return Int((Double(part) / Double(total) * 100).rounded())
     }
+}
 
-    
-    
-    
-    
-    // MARK: - Текстовые помощники
-    
-    // "1 фото", "2 фотографии", "5 фотографий"
-    private func photoWord(_ count: Int) -> String {
-        let lastDigit = count % 10
-        let lastTwo = count % 100
+// MARK: - Склонение слова «файл»
+
+private extension Int {
+    func fileWord() -> String {
+        let lastDigit = self % 10
+        let lastTwo = self % 100
         
         if lastTwo >= 11 && lastTwo <= 14 {
-            return "фотографий"
+            return "файлов"
         }
         switch lastDigit {
-        case 1: return "фотография"
-        case 2, 3, 4: return "фотографии"
-        default: return "фотографий"
-        }
-    }
-    
-    // Подпись под streak в зависимости от значения
-    private func streakSubtitle() -> String {
-        let count = storage.currentStreak
-        if count == 0 {
-            return "Начните прямо сейчас!"
-        } else if count == 1 {
-            return "Отличное начало"
-        } else if count < 7 {
-            return "Так держать!"
-        } else if count < 30 {
-            return "Великолепно"
-        } else {
-            return "Невероятно!"
+        case 1: return "файл"
+        case 2, 3, 4: return "файла"
+        default: return "файлов"
         }
     }
 }
