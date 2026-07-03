@@ -6,9 +6,32 @@ struct PhotoCardView: View {
     let offset: CGFloat
     let onSkip: () -> Void
     
+    // NEW: насколько утащили карточку (приходит из SortingView).
+    // Нужно для расчёта интенсивности и направления оверлея свайпа.
+    // Отрицательное = влево (удалить), положительное = вправо (оставить).
+    let dragOffset: CGFloat
+    
     @Binding var pinchScale: CGFloat
-    @Binding var pinchAnchor: UnitPoint  // NEW
+    @Binding var pinchAnchor: UnitPoint
     @Binding var panOffset: CGSize
+
+    // MARK: - Константы оверлея свайпа
+    
+    // Дистанция, на которой оверлей достигает максимума.
+    // Берём равной swipeThreshold (120) из SortingView — к моменту
+    // засчитывания свайпа оверлей уже на полную силу.
+    private let overlayFullDistance: CGFloat = 120
+    
+    // «Мёртвая зона» в начале драга: первые N точек оверлея ещё нет.
+    // Защищает от мигания при микродрожании пальца.
+    private let overlayActivation: CGFloat = 12
+    
+    // Потолок непрозрачности цветной ЗАЛИВКИ. Не 1.0 — иначе фото
+    // полностью скроется, а пользователь хочет видеть, что удаляет/оставляет.
+    private let overlayFillMaxOpacity: Double = 0.45
+    
+    // Радиус скругления карточки — должен совпадать с фото и видео-плеером.
+    private let cardCornerRadius: CGFloat = 20
 
     var body: some View {
         Group {
@@ -17,15 +40,63 @@ struct PhotoCardView: View {
             } else {
                 PhotoImageView(asset: item.asset, onSkip: onSkip)
                     .scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                    .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius))
                     // Scale around the anchor point captured at pinch start
                     .scaleEffect(pinchScale, anchor: pinchAnchor)
                     // Then translate based on pan
                     .offset(panOffset)
             }
         }
+        // Оверлей свайпа — поверх всего содержимого карточки.
+        // Лежит ВНУТРИ PhotoCardView, поэтому наследует rotationEffect и
+        // offset ниже — улетает и поворачивается вместе с карточкой.
+        .overlay {
+            swipeOverlay
+        }
         .rotationEffect(.degrees(Double(offset) / 20))
         .offset(x: offset)
+    }
+    
+    // MARK: - Оверлей свайпа
+    
+    @ViewBuilder
+    private var swipeOverlay: some View {
+        // intensity: 0...1, насколько ярко показывать оверлей.
+        // Вычитаем мёртвую зону, делим на рабочую дистанцию, ограничиваем 0...1.
+        let distance = abs(dragOffset)
+        let rawIntensity = (distance - overlayActivation) / (overlayFullDistance - overlayActivation)
+        let intensity = max(0, min(1, rawIntensity))
+        
+        // Направление: влево (<0) удалить — красный/корзина;
+        // вправо (>0) оставить — зелёный/галочка.
+        let isDelete = dragOffset < 0
+        let color: Color = isDelete ? .red : .green
+        let iconName = isDelete ? "trash.fill" : "checkmark.circle.fill"
+        
+        // Рисуем только когда есть что показывать (intensity > 0).
+        // При intensity == 0 (карточка по центру) оверлей полностью прозрачен.
+        if intensity > 0 {
+            ZStack {
+                // Цветная заливка по форме карточки.
+                // Непрозрачность = intensity * потолок (0.45).
+                RoundedRectangle(cornerRadius: cardCornerRadius)
+                    .fill(color.opacity(intensity * overlayFillMaxOpacity))
+                
+                // Иконка по центру. Непрозрачность доходит до 1.0.
+                Image(systemName: iconName)
+                    .font(.system(size: 72, weight: .bold))
+                    .foregroundColor(.white)
+                    .opacity(intensity)
+                    // Лёгкая тень, чтобы иконка читалась на светлом фото.
+                    .shadow(color: .black.opacity(0.25), radius: 8)
+                    // Небольшой «прирост» размера с интенсивностью —
+                    // иконка как будто наливается силой к порогу свайпа.
+                    .scaleEffect(0.8 + 0.2 * intensity)
+            }
+            // Оверлей не должен перехватывать касания — жесты идут сквозь него
+            // к нижележащему DragGesture/ZoomGestureOverlay в SortingView.
+            .allowsHitTesting(false)
+        }
     }
 }
 

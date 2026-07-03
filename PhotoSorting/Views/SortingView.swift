@@ -45,10 +45,8 @@ struct SortingView: View {
     
     private let swipeThreshold: CGFloat = 120   // минимальный сдвиг для засчитывания свайпа
     private let cardFlyOutDistance: CGFloat = 600 // расстояние улёта карточки за экран
-    private let labelOpacityDivisor: Double = 80  // делитель для прозрачности надписей УДАЛИТЬ/ОСТАВИТЬ
-    private let labelOpacityOffset: Double = 20   // сдвиг начала появления надписи
-    private let swipeAnimationDuration: Double = 0.25  // длительность анимации улёта карточки
-    private let nextCardDelay: Double = 0.3            // задержка перед показом следующей карточки
+    private let swipeAnimationDuration: Double = 0.18  // длительность анимации улёта карточки
+    private let nextCardDelay: Double = 0.18           // задержка перед показом следующей карточки
     private let preloadAheadCount: Int = 2             // сколько карточек предзагружать вперёд
     private let cardTargetWidth: CGFloat = 360         // ширина карточки для загрузки изображения
     private let cardTargetHeight: CGFloat = 540        // высота карточки для загрузки изображения
@@ -164,13 +162,13 @@ struct SortingView: View {
             Spacer()
             GeometryReader { geometry in
                 ZStack {
-                    behindCardLabels
                     PhotoCardView(
                         item: photos[currentIndex],
                         offset: dragOffset,
                         onSkip: {
                             performSwipe(direction: .right)
                         },
+                        dragOffset: dragOffset,
                         pinchScale: $pinchScale,
                         pinchAnchor: $pinchAnchor,
                         panOffset: $panOffset
@@ -250,30 +248,6 @@ struct SortingView: View {
                 }
             }
             .frame(height: 6)
-        }
-    }
-    
-    // MARK: - Надписи за карточкой
-    
-    private var behindCardLabels: some View {
-        ZStack {
-            HStack {
-                Text("ОСТАВИТЬ")
-                    .font(.system(size: 32, weight: .black))
-                    .foregroundColor(.green)
-                    .opacity(Double(max(dragOffset - labelOpacityOffset, 0)) / labelOpacityDivisor)
-                Spacer()
-            }
-            .padding(.leading, 24)
-            
-            HStack {
-                Spacer()
-                Text("УДАЛИТЬ")
-                    .font(.system(size: 32, weight: .black))
-                    .foregroundColor(.red)
-                    .opacity(Double(max(-dragOffset - labelOpacityOffset, 0)) / labelOpacityDivisor)
-            }
-            .padding(.trailing, 24)
         }
     }
     

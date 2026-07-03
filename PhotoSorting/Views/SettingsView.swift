@@ -12,6 +12,10 @@ struct SettingsView: View {
     // @State чтобы UI обновлялся при изменении
     @Bindable private var storage = StorageService.shared
     
+    // URL политики конфиденциальности.
+    // TODO: ЗАГЛУШКА — заменить на реальную ссылку перед публикацией.
+    private let privacyPolicyURL = URL(string: "https://example.com/privacy")!
+    
     var body: some View {
         NavigationStack {
             Form {
@@ -38,18 +42,6 @@ struct SettingsView: View {
     
                 Section {
                     HStack {
-                        Image(systemName: "bell.fill")
-                            .foregroundColor(.orange)
-                            .frame(width: 28)
-                        Text("Уведомления")
-                        Spacer()
-                        Text("Скоро")
-                            .font(.system(size: 14))
-                            .foregroundColor(.secondary)
-                    }
-                    .opacity(0.5)
-                    
-                    HStack {
                         Image(systemName: "lock.shield.fill")
                             .foregroundColor(.purple)
                             .frame(width: 28)
@@ -63,7 +55,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Будущие функции")
                 } footer: {
-                    Text("Эти функции появятся в следующих обновлениях.")
+                    Text("Отвлекающие приложения будут заблокированы, пока вы не выполните дневную цель сортировки.")
                 }
                 
                 // MARK: Дебаг удалить перед публикацией
@@ -100,15 +92,23 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
                     
-                    HStack {
-                        Image(systemName: "hand.raised.fill")
-                            .foregroundColor(.green)
-                            .frame(width: 28)
-                        Text("Политика конфиденциальности")
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 13))
-                            .foregroundColor(.secondary)
+                    // Политика конфиденциальности — рабочая внешняя ссылка.
+                    // Link сам открывает Safari. Внутри — та же раскладка строки,
+                    // что и у остальных, но с иконкой внешней ссылки справа.
+                    Link(destination: privacyPolicyURL) {
+                        HStack {
+                            Image(systemName: "hand.raised.fill")
+                                .foregroundColor(.green)
+                                .frame(width: 28)
+                            Text("Политика конфиденциальности")
+                                // Перекрашиваем в обычный цвет текста — иначе
+                                // Link красит всё содержимое в синий (accent).
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.secondary)
+                        }
                     }
                 } header: {
                     Text("О приложении")

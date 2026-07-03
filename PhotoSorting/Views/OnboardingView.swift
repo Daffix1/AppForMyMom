@@ -2,6 +2,8 @@ import SwiftUI
 
 struct OnboardingView: View {
     // Колбэк вызывается когда пользователь прошёл онбординг
+    // (либо долистал и нажал финальную кнопку, либо нажал "Пропустить").
+    // Дальше по цепочке MainScreenView.loadPhotos() запросит доступ к фото.
     let onComplete: () -> Void
     
     @State private var currentPage = 0
@@ -27,9 +29,17 @@ struct OnboardingView: View {
             iconColor: .orange,
             title: "Готовы начать?",
             description: "Нам нужен доступ к вашей галерее, чтобы найти фото для разбора. Все ваши данные остаются на устройстве — мы ничего никуда не отправляем.",
-            buttonTitle: "Поехали"
+            // На последней странице надпись финальной кнопки переопределяется
+            // вычисляемым свойством actionButtonTitle (см. ниже). Это значение
+            // здесь — запасное, на случай если логика страниц поменяется.
+            buttonTitle: "Дать доступ к фото"
         )
     ]
+    
+    // Удобный флаг: находимся ли на последней странице.
+    private var isLastPage: Bool {
+        currentPage == pages.count - 1
+    }
     
     var body: some View {
         ZStack {
@@ -37,7 +47,12 @@ struct OnboardingView: View {
                 .ignoresSafeArea()
             
             VStack(spacing: 0) {
-                // Индикатор страниц вверху
+                // Верхний ряд: "Назад" слева, "Пропустить" справа
+                topBar
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                
+                // Индикатор страниц
                 pageIndicator
                     .padding(.top, 16)
                     .padding(.bottom, 32)
@@ -59,6 +74,54 @@ struct OnboardingView: View {
                     .padding(.bottom, 24)
             }
         }
+    }
+    
+    // MARK: - Верхний ряд (Назад / Пропустить)
+    
+    private var topBar: some View {
+        HStack {
+            // "Назад" — появляется со 2-й страницы.
+            // На 1-й странице рисуем невидимую заглушку того же размера,
+            // чтобы "Пропустить" справа не прыгал по горизонтали.
+            if currentPage > 0 {
+                Button {
+                    goBack()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("Назад")
+                            .font(.system(size: 16, weight: .medium))
+                    }
+                    .foregroundColor(.blue)
+                }
+            } else {
+                // Невидимая заглушка-распорка (занимает место, но не видна)
+                Text("Назад")
+                    .font(.system(size: 16, weight: .medium))
+                    .opacity(0)
+            }
+            
+            Spacer()
+            
+            // "Пропустить" — на всех страницах, кроме последней.
+            // Делает то же, что финальная кнопка: завершает онбординг.
+            if !isLastPage {
+                Button {
+                    completeOnboarding()
+                } label: {
+                    Text("Пропустить")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+            } else {
+                // Заглушка-распорка для симметрии высоты ряда
+                Text("Пропустить")
+                    .font(.system(size: 16, weight: .medium))
+                    .opacity(0)
+            }
+        }
+        .frame(height: 24)
     }
     
     // MARK: - Индикатор страниц
@@ -112,25 +175,55 @@ struct OnboardingView: View {
     // MARK: - Кнопка действия
     
     private var actionButton: some View {
-        Button(pages[currentPage].buttonTitle) {
+        Button(actionButtonTitle) {
             handleButtonTap()
         }
         .primaryButtonStyle()
     }
     
-    // MARK: - Логика кнопки
+    // Надпись на нижней кнопке: на последней странице — "Дать доступ к фото",
+    // на остальных — "Дальше". Берём текст из модели страницы, но для
+    // последней страницы делаем явный кейс, чтобы намерение читалось в коде.
+    private var actionButtonTitle: String {
+        if isLastPage {
+            return "Дать доступ к фото"
+        } else {
+            return pages[currentPage].buttonTitle
+        }
+    }
     
+    // MARK: - Логика кнопок
+    
+    // Тап по нижней кнопке.
     private func handleButtonTap() {
-        if currentPage < pages.count - 1 {
-            // Не последняя страница — листаем вперёд
+        if isLastPage {
+            // Последняя страница — завершаем онбординг.
+            // Дальше MainScreenView запросит доступ к фото (системное окно).
+            completeOnboarding()
+        } else {
+            // Не последняя страница — листаем вперёд.
             withAnimation {
                 currentPage += 1
             }
-        } else {
-            // Последняя страница — отмечаем онбординг пройденным
-            StorageService.shared.onboardingCompleted = true
-            onComplete()
         }
+    }
+    
+    // "Назад" — на предыдущую страницу.
+    private func goBack() {
+        guard currentPage > 0 else { return }
+        withAnimation {
+            currentPage -= 1
+        }
+    }
+    
+    // Завершение онбординга. Вызывается из:
+    //   - финальной кнопки на последней странице
+    //   - кнопки "Пропустить"
+    // Оба сценария ведут к одному и тому же: помечаем онбординг пройденным
+    // и зовём onComplete(), который запустит запрос доступа к фото.
+    private func completeOnboarding() {
+        StorageService.shared.onboardingCompleted = true
+        onComplete()
     }
 }
 
