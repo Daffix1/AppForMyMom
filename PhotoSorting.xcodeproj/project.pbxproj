@@ -10,6 +10,7 @@
 		3B8C73992FACCB9A00F8BD55 /* AppButtons.swift .swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B8C73982FACCB9A00F8BD55 /* AppButtons.swift .swift */; };
 		3B8C739C2FACF2C000F8BD55 /* IntExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B8C739B2FACF2C000F8BD55 /* IntExtensions.swift */; };
 		3B942A992FB35AE30094B383 /* ZoomGestureOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B942A982FB35AE30094B383 /* ZoomGestureOverlay.swift */; };
+		3B98B9802FF78F170000530F /* CalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B98B97F2FF78F170000530F /* CalendarView.swift */; };
 		3BADCD612FA7580E003DDB45 /* PhotoSortingApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BADCD602FA7580E003DDB45 /* PhotoSortingApp.swift */; };
 		3BADCD632FA7580E003DDB45 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BADCD622FA7580E003DDB45 /* ContentView.swift */; };
 		3BADCD652FA75815003DDB45 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3BADCD642FA75815003DDB45 /* Assets.xcassets */; };
@@ -33,6 +34,7 @@
 		3B8C73982FACCB9A00F8BD55 /* AppButtons.swift .swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppButtons.swift .swift"; sourceTree = "<group>"; };
 		3B8C739B2FACF2C000F8BD55 /* IntExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntExtensions.swift; sourceTree = "<group>"; };
 		3B942A982FB35AE30094B383 /* ZoomGestureOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoomGestureOverlay.swift; sourceTree = "<group>"; };
+		3B98B97F2FF78F170000530F /* CalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarView.swift; sourceTree = "<group>"; };
 		3BADCD5D2FA7580E003DDB45 /* PhotoSorting.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PhotoSorting.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3BADCD602FA7580E003DDB45 /* PhotoSortingApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoSortingApp.swift; sourceTree = "<group>"; };
 		3BADCD622FA7580E003DDB45 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -135,6 +137,7 @@
 				3BADCD732FA75AE6003DDB45 /* PhotoLibraryService.swift */,
 				3BADCD802FA78862003DDB45 /* StorageService.swift */,
 				3BADCD882FA7AEF4003DDB45 /* HapticsService.swift */,
+				3B98B97F2FF78F170000530F /* CalendarView.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -239,6 +242,7 @@
 				3BADCD7B2FA76C43003DDB45 /* VideoPlayerView.swift in Sources */,
 				3BADCD812FA78862003DDB45 /* StorageService.swift in Sources */,
 				3BADCD8D2FA8F1B4003DDB45 /* DailySessionState.swift in Sources */,
+				3B98B9802FF78F170000530F /* CalendarView.swift in Sources */,
 				3BADCD872FA7AE14003DDB45 /* SettingsView.swift in Sources */,
 				3B8C73992FACCB9A00F8BD55 /* AppButtons.swift .swift in Sources */,
 				3BADCD7F2FA7855E003DDB45 /* MainScreenView.swift in Sources */,

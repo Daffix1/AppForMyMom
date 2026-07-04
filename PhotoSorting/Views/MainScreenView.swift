@@ -11,6 +11,7 @@ struct MainScreenView: View {
     
     @State private var showStats = false
     @State private var showSettings = false
+    @State private var showCalendar = false
     
     @State private var autoStartAfterDismiss = false
     
@@ -62,6 +63,14 @@ struct MainScreenView: View {
                         .background(Color(.secondarySystemGroupedBackground))
                         .clipShape(Circle())
                 }
+                Button { showCalendar = true } label: {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.blue)
+                        .frame(width: 40, height: 40)
+                        .background(Color(.secondarySystemGroupedBackground))
+                        .clipShape(Circle())
+                }
                 Spacer()
                 Button { showSettings = true } label: {
                     Image(systemName: "gearshape.fill")
@@ -106,6 +115,13 @@ struct MainScreenView: View {
                 Task { await loadPhotos() }
             }
         }
+        .sheet(isPresented: $showCalendar) {
+                    CalendarView(onDateSelected: { date in
+                        // TODO: подключить к сортировке через SessionStore (следующий сеанс).
+                        // Пока — заглушка: просто печатаем выбранную дату.
+                        print("Календарь: выбрана дата \(date)")
+                    })
+                }
     }
     
     // MARK: - Состояния
