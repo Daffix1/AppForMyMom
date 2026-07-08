@@ -18,9 +18,18 @@ struct MainScreenView: View {
     // Wrapper for the data fullScreenCover(item:) hands off to SortingView.
     // Using item: instead of isPresented: guarantees SwiftUI has the full
     // payload in place before it constructs the SortingView body.
+    //
+    // Теперь payload несёт не только фото, но и sessionStore. Причина:
+    // стор бывает разный (TodaySessionStore для сегодня, EphemeralSessionStore
+    // для дня из календаря), и его нужно создать РОВНО ОДИН РАЗ и передать в
+    // SortingView. Если бы стор создавался в замыкании fullScreenCover, при
+    // каждой перерисовке возникал бы новый пустой стор и прогресс эфемерного
+    // дня терялся бы. Кладя стор в payload, фиксируем один экземпляр на сессию.
+    
     private struct SortingSessionPayload: Identifiable {
         let id = UUID()
         let photos: [PhotoItem]
+        let sessionStore: SessionStore
     }
     
     // Прямой доступ к реактивному singleton'у
@@ -63,6 +72,7 @@ struct MainScreenView: View {
                         .background(Color(.secondarySystemGroupedBackground))
                         .clipShape(Circle())
                 }
+                Spacer()
                 Button { showCalendar = true } label: {
                     Image(systemName: "calendar")
                         .font(.system(size: 18, weight: .semibold))
@@ -71,7 +81,6 @@ struct MainScreenView: View {
                         .background(Color(.secondarySystemGroupedBackground))
                         .clipShape(Circle())
                 }
-                Spacer()
                 Button { showSettings = true } label: {
                     Image(systemName: "gearshape.fill")
                         .font(.system(size: 18, weight: .semibold))
@@ -100,7 +109,7 @@ struct MainScreenView: View {
         }) { payload in
             SortingView(
                 photos: payload.photos,
-                sessionStore: TodaySessionStore(),
+                sessionStore: payload.sessionStore,
                 onFinish: { sortingPayload = nil },
                 onContinueRequested: {
                     autoStartAfterDismiss = true
@@ -117,12 +126,12 @@ struct MainScreenView: View {
             }
         }
         .sheet(isPresented: $showCalendar) {
-                    CalendarView(onDateSelected: { date in
-                        // TODO: подключить к сортировке через SessionStore (следующий сеанс).
-                        // Пока — заглушка: просто печатаем выбранную дату.
-                        print("Календарь: выбрана дата \(date)")
-                    })
-                }
+            CalendarView(onDateSelected: { date in
+                // Подключено: выбор даты запускает сортировку за этот день.
+                // launchSorting сам выберет нужный стор по дате.
+                Task { await launchSorting(for: date) }
+            })
+        }
     }
     
     // MARK: - Состояния
@@ -290,12 +299,41 @@ struct MainScreenView: View {
         }
     }
     
-    private func startSorting() async {
-        let sessionDate = storage.currentSession.date
-        let photos = await photoService.fetchAllPhotos(for: sessionDate)
+    // MARK: - Запуск сортировки
+    
+    // Единая точка входа в сортировку за ЛЮБОЙ день.
+    //
+    //   - Выбирает стор по дате: сегодня → TodaySessionStore (персист + resume),
+    //     прошлый день → EphemeralSessionStore (в памяти, разовая сессия).
+    //   - Грузит фото за этот день через fetchAllPhotos(for:).
+    //   - Кладёт фото И стор в payload (стор создаётся здесь ровно один раз).
+    //
+    // И кнопка с главного экрана, и колбэк из календаря идут через этот метод —
+    // логика выбора стора живёт в одном месте.
+    private func launchSorting(for date: Date) async {
+        let store: SessionStore
+        if Calendar.current.isDateInToday(date) {
+            // Сегодня — всегда через TodaySessionStore, независимо от того,
+            // откуда зашли (главный экран или календарь). Это гарантирует
+            // ЕДИНУЮ сегодняшнюю сессию с одним прогрессом.
+            store = TodaySessionStore()
+        } else {
+            // Прошлый день — эфемерная сессия в памяти.
+            store = EphemeralSessionStore(date: date)
+        }
+        
+        let dayPhotos = await photoService.fetchAllPhotos(for: date)
+        
         // Setting this single piece of state both triggers the cover AND
-        // hands SwiftUI the photos array atomically.
-        sortingPayload = SortingSessionPayload(photos: photos)
+        // hands SwiftUI the photos array + store atomically.
+        sortingPayload = SortingSessionPayload(photos: dayPhotos, sessionStore: store)
+    }
+    
+    // Запуск сегодняшней сортировки — тонкая обёртка над launchSorting.
+    // Берём дату из текущей сессии (она сегодняшняя), чтобы поведение
+    // совпадало с прежним startSorting.
+    private func startSorting() async {
+        await launchSorting(for: storage.currentSession.date)
     }
     
     // MARK: - Прочее

@@ -647,9 +647,16 @@ struct SortingView: View {
     // выбранного дня). Поправим при подключении календаря — вероятно, считая
     // по sessionStore.date. Пока для сегодня работает корректно.
     private func calculateRemaining() async -> Int {
-        let remaining = await photoService.fetchPhotosForToday()
-        return remaining.count
-    }
+            // Для сегодня считаем реальный остаток за день (fetchPhotosForToday
+            // уже фильтрует по обработанным). Для прошлого дня из календаря остаток
+            // не имеет смысла — это разовая сессия без resume, дошёл до финала =
+            // всё пройдено. Возвращаем 0.
+            guard Calendar.current.isDateInToday(sessionStore.date) else {
+                return 0
+            }
+            let remaining = await photoService.fetchPhotosForToday()
+            return remaining.count
+        }
 }
 
 // MARK: - Финальный экран
