@@ -8,12 +8,46 @@ struct SortingView: View {
     private let photoService = PhotoLibraryService.shared
     private let storage = StorageService.shared
     
+    // MARK: - Источник сессии
+    //
+    // Раньше SortingView читал/писал напрямую StorageService.shared.currentSession
+    // и потому умел работать только с "сегодня". Теперь он работает через
+    // sessionStore — абстракцию "где живёт сессия за этот день":
+    //   - TodaySessionStore     → проксирует в StorageService (персист + resume)
+    //   - EphemeralSessionStore → состояние в памяти, без сохранения и resume
+    //
+    // Всё, что раньше было "storage.currentSession = session", теперь
+    // "sessionStore.session = session". Для сегодня это тот же StorageService,
+    // поэтому поведение не меняется.
+    private let sessionStore: SessionStore
+    
     // Колбэки
     let onFinish: () -> Void              // выйти на главный
     let onContinueRequested: () -> Void   // продолжить с оставшимися (закрыть и переоткрыть)
     
-    // Копия сессии чтобы не нагружать память
-    @State private var session: DailySessionState = StorageService.shared.currentSession
+    // MARK: - Init
+    //
+    // Раньше init генерировался автоматически. Теперь, из-за sessionStore и
+    // ручной инициализации @State session, пишем явный init.
+    // _session = State(initialValue:) — способ задать стартовое значение
+    // @State-переменной из параметра init.
+    init(
+        photos: [PhotoItem],
+        sessionStore: SessionStore,
+        onFinish: @escaping () -> Void,
+        onContinueRequested: @escaping () -> Void
+    ) {
+        self.photos = photos
+        self.sessionStore = sessionStore
+        self.onFinish = onFinish
+        self.onContinueRequested = onContinueRequested
+        _session = State(initialValue: sessionStore.session)
+    }
+    
+    // Рабочая копия сессии. Инициализируется из sessionStore в init.
+    // Мы гоняем изменения по этой локальной копии, а затем пишем обратно
+    // в sessionStore.session (что для сегодня уходит в UserDefaults).
+    @State private var session: DailySessionState
     
     // Счетчик фото, сколько отсортировали
     @State private var currentIndex = 0
@@ -56,10 +90,10 @@ struct SortingView: View {
             mainContent
         }
         .onAppear {
-            session = storage.currentSession
+            session = sessionStore.session
             if session.phase == .idle {
                 session.phase = .sorting
-                storage.currentSession = session
+                sessionStore.session = session
             }
             reconstructStateFromLog()
             preloadNextPhotos()
@@ -324,12 +358,22 @@ struct SortingView: View {
                 DailySessionState.SwipeEntry(photoID: photo.id, direction: entryDirection)
             )
             
-            // Storage writes (these trigger UserDefaults I/O)
-            storage.currentSession = session
+            // Записываем сессию через стор. Для сегодня это UserDefaults I/O,
+            // для эфемерного дня — просто в память.
+            sessionStore.session = session
             
-            var sorted = storage.sortedPhotoIDs
-            sorted.insert(photo.id)
-            storage.sortedPhotoIDs = sorted
+            // ПУЛ sortedPhotoIDs — только если стор персистит пул сразу.
+            // TodaySessionStore: true  → помечаем фото обработанным немедленно.
+            // EphemeralSessionStore: false → не трогаем пул до финала (у эфемерного
+            //   дня нет resume, брошенная сессия не должна "съедать" фото из
+            //   будущих сегодняшних выборок без подтверждённого решения).
+            // Обрати внимание: счётчики (currentDeletedIDs/currentKeptIDs) выше
+            // НЕ под флагом — они часть сессии и считаются всегда одинаково.
+            if sessionStore.persistsPoolImmediately {
+                var sorted = storage.sortedPhotoIDs
+                sorted.insert(photo.id)
+                storage.sortedPhotoIDs = sorted
+            }
             
             // STEP 3: Wait for the fly-out animation to mostly finish,
             // then show the next card.
@@ -339,7 +383,7 @@ struct SortingView: View {
             
             if currentIndex >= photos.count {
                 session.phase = .awaitingDecision
-                storage.currentSession = session
+                sessionStore.session = session
                 sessionFinished = true
             } else {
                 preloadNextPhotos()
@@ -351,7 +395,7 @@ struct SortingView: View {
     private func finishSessionEarly() {
         HapticsService.shared.play(.medium)
         session.phase = .awaitingDecision
-        storage.currentSession = session
+        sessionStore.session = session
         sessionFinished = true
     }
     
@@ -365,7 +409,7 @@ struct SortingView: View {
         let lastDirection = swipeHistory.removeLast()
         let photo = photos[currentIndex]
         
-        // Откатываем изменения в session
+        // Откатываем изменения в session (счётчики — всегда, для обоих сторов)
         if lastDirection == .left {
             if !session.currentDeletedIDs.isEmpty {
                 session.currentDeletedIDs.removeLast()
@@ -387,12 +431,16 @@ struct SortingView: View {
             session.swipeLog.removeLast()
         }
         
-        storage.currentSession = session
+        sessionStore.session = session
         
-        // Откат в глобальном списке
-        var sorted = storage.sortedPhotoIDs
-        sorted.remove(photo.id)
-        storage.sortedPhotoIDs = sorted
+        // Откат в глобальном пуле — только если стор персистит пул сразу.
+        // Для эфемерного дня при свайпе в пул ничего не клали, значит и
+        // откатывать нечего — пропускаем.
+        if sessionStore.persistsPoolImmediately {
+            var sorted = storage.sortedPhotoIDs
+            sorted.remove(photo.id)
+            storage.sortedPhotoIDs = sorted
+        }
         
         dragOffset = 0
     }
@@ -434,6 +482,10 @@ struct SortingView: View {
     // сбрасывается — currentIndex становится 0, swipeHistory пустеет.
     // Но в session.swipeLog хранится полная история свайпов за сессию.
     // Этот метод "догоняет" локальное состояние до содержимого журнала.
+    //
+    // Для эфемерного дня swipeLog всегда пуст при открытии (новый объект
+    // стора → новая пустая сессия), поэтому этот метод для него — no-op,
+    // что и требуется: эфемерный день начинается с чистого листа.
     private func reconstructStateFromLog() {
         let log = session.swipeLog
         guard !log.isEmpty else {
@@ -529,7 +581,9 @@ struct SortingView: View {
         return true
     }
         
-    // Возвращает оставленные ID в общий пул — снова появятся в следующих сессиях
+    // Возвращает оставленные ID в общий пул — снова появятся в следующих сессиях.
+    // Для эфемерного дня пул при свайпах не пополнялся, поэтому remove здесь
+    // работает на пустом/несодержащем множестве — безопасный no-op.
     private func returnKeptToPool() {
         var sorted = storage.sortedPhotoIDs
         for id in session.currentKeptIDs {
@@ -539,7 +593,8 @@ struct SortingView: View {
     }
         
     // Возвращает ВСЕ обработанные ID в пул (для startOver)
-    // Включая помеченные к удалению — они не были физически удалены, только помечены
+    // Включая помеченные к удалению — они не были физически удалены, только помечены.
+    // Для эфемерного дня — тоже безопасный no-op по той же причине.
     private func returnAllProcessedToPool() {
         var sorted = storage.sortedPhotoIDs
         for id in session.processedIDs {
@@ -556,10 +611,10 @@ struct SortingView: View {
         session.swipeLog = []
     }
     
-    // Меняет фазу сессии и сохраняет в storage
+    // Меняет фазу сессии и сохраняет в стор
     private func saveSessionPhase(_ phase: DailySessionState.Phase) {
         session.phase = phase
-        storage.currentSession = session
+        sessionStore.session = session
     }
     
     // MARK: - Вспомогательные функции
@@ -584,7 +639,13 @@ struct SortingView: View {
         }
     }
         
-    // Сколько фото за сегодня ещё несвайпнуты
+    // Сколько фото за сегодня ещё несвайпнуты.
+    //
+    // ВНИМАНИЕ (флажок для коммита 3): сейчас это всегда считает по СЕГОДНЯ
+    // через fetchPhotosForToday(). Для эфемерного дня из календаря это число
+    // будет неверным ("осталось" покажет сегодняшний остаток, а не остаток
+    // выбранного дня). Поправим при подключении календаря — вероятно, считая
+    // по sessionStore.date. Пока для сегодня работает корректно.
     private func calculateRemaining() async -> Int {
         let remaining = await photoService.fetchPhotosForToday()
         return remaining.count

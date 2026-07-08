@@ -127,10 +127,11 @@ struct DailySessionState: Codable {
     
     // MARK: - Создание новой сессии
     
-    // Пустая сессия для текущего дня
-    static func newToday() -> DailySessionState {
+    // Пустая сессия для ЛЮБОЙ даты — общая фабрика.
+    // Используется и для сегодня, и для дней из календаря.
+    static func newSession(for date: Date) -> DailySessionState {
         DailySessionState(
-            date: Date(),
+            date: date,
             phase: .idle,
             processedIDs: [],
             pendingDeleteIDs: [],
@@ -139,4 +140,9 @@ struct DailySessionState: Codable {
             swipeLog: []
         )
     }
+        
+        // Пустая сессия для сегодня — удобная обёртка над newSession(for:).
+        static func newToday() -> DailySessionState {
+            newSession(for: Date())
+        }
 }

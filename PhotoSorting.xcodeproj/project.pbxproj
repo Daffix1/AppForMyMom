@@ -11,6 +11,7 @@
 		3B8C739C2FACF2C000F8BD55 /* IntExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B8C739B2FACF2C000F8BD55 /* IntExtensions.swift */; };
 		3B942A992FB35AE30094B383 /* ZoomGestureOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B942A982FB35AE30094B383 /* ZoomGestureOverlay.swift */; };
 		3B98B9802FF78F170000530F /* CalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B98B97F2FF78F170000530F /* CalendarView.swift */; };
+		3B98B9822FF911B30000530F /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B98B9812FF911B30000530F /* SessionStore.swift */; };
 		3BADCD612FA7580E003DDB45 /* PhotoSortingApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BADCD602FA7580E003DDB45 /* PhotoSortingApp.swift */; };
 		3BADCD632FA7580E003DDB45 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BADCD622FA7580E003DDB45 /* ContentView.swift */; };
 		3BADCD652FA75815003DDB45 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3BADCD642FA75815003DDB45 /* Assets.xcassets */; };
@@ -35,6 +36,7 @@
 		3B8C739B2FACF2C000F8BD55 /* IntExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntExtensions.swift; sourceTree = "<group>"; };
 		3B942A982FB35AE30094B383 /* ZoomGestureOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZoomGestureOverlay.swift; sourceTree = "<group>"; };
 		3B98B97F2FF78F170000530F /* CalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarView.swift; sourceTree = "<group>"; };
+		3B98B9812FF911B30000530F /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
 		3BADCD5D2FA7580E003DDB45 /* PhotoSorting.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PhotoSorting.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3BADCD602FA7580E003DDB45 /* PhotoSortingApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoSortingApp.swift; sourceTree = "<group>"; };
 		3BADCD622FA7580E003DDB45 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -117,6 +119,7 @@
 		3BADCD6E2FA75839003DDB45 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				3B98B97F2FF78F170000530F /* CalendarView.swift */,
 				3BADCD752FA75F63003DDB45 /* SortingView.swift */,
 				3BADCD772FA75F74003DDB45 /* PhotoCardView.swift */,
 				3BADCD7A2FA76C43003DDB45 /* VideoPlayerView.swift */,
@@ -137,7 +140,7 @@
 				3BADCD732FA75AE6003DDB45 /* PhotoLibraryService.swift */,
 				3BADCD802FA78862003DDB45 /* StorageService.swift */,
 				3BADCD882FA7AEF4003DDB45 /* HapticsService.swift */,
-				3B98B97F2FF78F170000530F /* CalendarView.swift */,
+				3B98B9812FF911B30000530F /* SessionStore.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -234,6 +237,7 @@
 				3BADCD782FA75F74003DDB45 /* PhotoCardView.swift in Sources */,
 				3BADCD892FA7AEF4003DDB45 /* HapticsService.swift in Sources */,
 				3B8C739C2FACF2C000F8BD55 /* IntExtensions.swift in Sources */,
+				3B98B9822FF911B30000530F /* SessionStore.swift in Sources */,
 				3BADCD8B2FA8D040003DDB45 /* PhotoCacheService.swift in Sources */,
 				3B942A992FB35AE30094B383 /* ZoomGestureOverlay.swift in Sources */,
 				3BADCD632FA7580E003DDB45 /* ContentView.swift in Sources */,

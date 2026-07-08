@@ -100,6 +100,7 @@ struct MainScreenView: View {
         }) { payload in
             SortingView(
                 photos: payload.photos,
+                sessionStore: TodaySessionStore(),
                 onFinish: { sortingPayload = nil },
                 onContinueRequested: {
                     autoStartAfterDismiss = true
