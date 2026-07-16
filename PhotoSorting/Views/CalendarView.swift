@@ -1,121 +1,160 @@
 import SwiftUI
 
-// Экран выбора даты для сортировки "этого дня прошлых лет".
-//
-// Что делает:
-//   - Показывает системный календарь (DatePicker в стиле .graphical).
-//   - Позволяет выбрать любой день от далёкого прошлого до сегодня включительно.
-//     Будущее выбрать нельзя — там нет "прошлых лет" относительно будущей даты,
-//     это только сбивало бы с толку.
-//   - По кнопке "Начать сортировку" отдаёт выбранную дату наверх через колбэк
-//     onDateSelected и закрывается.
-//
-// Чего НЕ делает (намеренно):
-//   - Не знает про SessionStore, SortingView, StorageService и прочую механику
-//     сортировки. Его единственная задача — выбрать дату и сообщить наверх.
-//     Куда потом ведёт эта дата — решает вызывающая сторона (MainScreenView).
-//     Такое разделение делает экран самодостаточным и лёгким для тестирования.
 struct CalendarView: View {
-    
-    // Колбэк: вызывается с выбранной датой, когда пользователь
-    // нажал "Начать сортировку". Вызывающая сторона решает, что делать дальше.
-    let onDateSelected: (Date) -> Void
-    
-    // dismiss — стандартный способ закрыть .sheet изнутри самого экрана.
+
+    let onDaySelected: (Date) -> Void
+
+    let selectedMonth: Int
+    let selectedDay: Int
+
     @Environment(\.dismiss) private var dismiss
-    
-    // Выбранная дата. По умолчанию — сегодня.
-    // @State: локальное состояние экрана, DatePicker будет писать сюда через $binding.
-    @State private var selectedDate = Date()
-    
+
+    @State private var displayedMonth: Int
+    @State private var isMovingForward = true
+
+    init(selectedMonth: Int, selectedDay: Int, onDaySelected: @escaping (Date) -> Void) {
+        self.selectedMonth = selectedMonth
+        self.selectedDay = selectedDay
+        self.onDaySelected = onDaySelected
+        _displayedMonth = State(initialValue: selectedMonth)
+    }
+
+    private let daysPerMonth = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+
+    private var monthName: String {
+        let symbols = DateFormatter().standaloneMonthSymbols ?? []
+        guard displayedMonth >= 1, displayedMonth <= symbols.count else { return "" }
+        return symbols[displayedMonth - 1].capitalized
+    }
+
+    private var daysInDisplayedMonth: Int {
+        daysPerMonth[displayedMonth - 1]
+    }
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 7)
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                
-                // MARK: - Календарь
-                
-                DatePicker(
-                    "Дата",
-                    selection: $selectedDate,
-                    // Ограничиваем диапазон: от "давным-давно" до сегодня включительно.
-                    // ...dateRangeUpperBound означает "любая дата вплоть до верхней границы".
-                    // Дни за пределами диапазона в календаре становятся недоступными (серыми).
-                    in: dateRangeLowerBound...dateRangeUpperBound,
-                    displayedComponents: .date  // только дата, без времени
-                )
-                // .graphical — тот самый календарь-сетка с кружочками дней.
-                // Именно этот стиль показывает месяц целиком, а не выпадашку.
-                .datePickerStyle(.graphical)
-                // Красим акцент в синий, чтобы совпадало с остальным приложением.
-                .tint(.blue)
-                .padding(.horizontal, 12)
-                
-                Spacer()
-                
-                // MARK: - Пояснение + кнопка
-                
-                VStack(spacing: 16) {
-                    // Подсказка: за какой день соберём фото.
-                    // Помогает пользователю понять, что выбор даты = "этот день прошлых лет".
-                    VStack(spacing: 4) {
-                        Text("Будут показаны фото за")
-                            .font(.system(size: 14))
-                            .foregroundColor(.secondary)
-                        Text(selectedDayString)
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundColor(.primary)
-                        Text("во все прошлые годы")
-                            .font(.system(size: 14))
-                            .foregroundColor(.secondary)
+            VStack(spacing: 20) {
+
+                HStack {
+                    Button {
+                        stepMonth(-1)
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(.blue)
+                            .frame(width: 44, height: 44)
                     }
-                    .multilineTextAlignment(.center)
-                    
-                    Button("Начать сортировку") {
-                        // Отдаём выбранную дату наверх и закрываемся.
-                        onDateSelected(selectedDate)
-                        dismiss()
+
+                    Spacer()
+
+                    Text(monthName)
+                        .font(.system(size: 20, weight: .semibold))
+                        .id("month-\(displayedMonth)")
+                        .transition(.opacity)
+
+                    Spacer()
+
+                    Button {
+                        stepMonth(1)
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(.blue)
+                            .frame(width: 44, height: 44)
                     }
-                    .primaryButtonStyle()
                 }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 24)
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+
+                LazyVGrid(columns: columns, spacing: 8) {
+                    ForEach(1...daysInDisplayedMonth, id: \.self) { day in
+                        let isSelected = (day == selectedDay && displayedMonth == selectedMonth)
+                        Button {
+                            selectDay(day)
+                        } label: {
+                            Text("\(day)")
+                                .font(.system(size: 17, weight: isSelected ? .semibold : .regular))
+                                .foregroundColor(isSelected ? .white : .primary)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .background(isSelected ? Color.blue : Color(.secondarySystemGroupedBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .id(displayedMonth)
+                .transition(.asymmetric(
+                    insertion: .move(edge: isMovingForward ? .trailing : .leading)
+                        .combined(with: .opacity),
+                    removal: .move(edge: isMovingForward ? .leading : .trailing)
+                        .combined(with: .opacity)
+                ))
+
+                Spacer()
+
+                Text("Будут показаны фото за этот день во все прошлые годы")
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                    .padding(.bottom, 24)
             }
+            .background(
+                MonthSwipeGesture(
+                    onSwipeLeft: { stepMonth(1) },
+                    onSwipeRight: { stepMonth(-1) }
+                )
+            )
             .navigationTitle("Выбор дня")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                // Кнопка закрытия без выбора — просто уйти с экрана.
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Закрыть") { dismiss() }
                 }
             }
         }
     }
-    
-    // MARK: - Границы диапазона дат
-    
-    // Верхняя граница — сегодня. Будущее недоступно.
-    private var dateRangeUpperBound: Date {
-        Date()
+
+    private func stepMonth(_ delta: Int) {
+        HapticsService.shared.play(.light)
+        isMovingForward = delta > 0
+
+        let zeroBased = displayedMonth - 1 + delta
+        let wrapped = ((zeroBased % 12) + 12) % 12
+
+        withAnimation(.easeInOut(duration: 0.25)) {
+            displayedMonth = wrapped + 1
+        }
     }
-    
-    // Нижняя граница — 40 лет назад. Совпадает с yearsBack в PhotoLibraryService:
-    // глубже мы всё равно не ищем фото, так что и выбирать нет смысла.
-    private var dateRangeLowerBound: Date {
-        Calendar.current.date(byAdding: .year, value: -40, to: Date()) ?? Date()
-    }
-    
-    // MARK: - Красивая строка выбранного дня
-    
-    // Выбранную дату показываем как "3 мая" — день и месяц словом, по-русски.
-    // Год не показываем: суть механики в "этом дне прошлых лет", год тут не важен.
-    private var selectedDayString: String {
-        selectedDate.formatted(.dateTime.day().month(.wide))
+
+    private func selectDay(_ day: Int) {
+        var components = DateComponents()
+        components.month = displayedMonth
+        components.day = day
+
+        let calendar = Calendar.current
+        let currentYear = calendar.component(.year, from: Date())
+
+        for year in stride(from: currentYear, through: currentYear - 8, by: -1) {
+            var c = components
+            c.year = year
+            if let date = calendar.date(from: c) {
+                let check = calendar.dateComponents([.month, .day], from: date)
+                if check.month == displayedMonth, check.day == day {
+                    onDaySelected(date)
+                    dismiss()
+                    return
+                }
+            }
+        }
+        dismiss()
     }
 }
 
 #Preview {
-    // В превью колбэк ничего не делает — просто печатает дату в консоль.
-    CalendarView(onDateSelected: { date in
-        print("Выбрана дата: \(date)")
+    CalendarView(selectedMonth: 4, selectedDay: 1, onDaySelected: { date in
+        print("Выбран день: \(date)")
     })
 }

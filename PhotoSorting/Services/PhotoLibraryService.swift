@@ -69,142 +69,75 @@ final class PhotoLibraryService {
     }
     
     // MARK: - Поиск фото за "этот день прошлых лет"
-    
-    func fetchPhotosForToday() async -> [PhotoItem] {
-        let calendar = Calendar.current
-        let today = Date()
-        
-        let month = calendar.component(.month, from: today)
-        let day = calendar.component(.day, from: today)
-        let currentYear = calendar.component(.year, from: today)
-        
-        // Вычисляем диапазоны дат для каждого года
-        var dateRanges: [NSPredicate] = []
-        
-        for year in (currentYear - yearsBack)...currentYear {
-            // Полночь нужного дня в нужном году
-            var components = DateComponents()
-            components.year = year
-            components.month = month
-            components.day = day
-            components.hour = 0
-            components.minute = 0
-            components.second = 0
-            
-            guard let startDate = calendar.date(from: components) else { continue }
-            // 24 часа спустя — конец дня
-            guard let endDate = calendar.date(byAdding: .day, value: 1, to: startDate) else { continue }
-            
-            // фото создано в этом интервале
-            let predicate = NSPredicate(
-                format: "creationDate >= %@ AND creationDate < %@",
-                startDate as NSDate,
-                endDate as NSDate
-            )
-            dateRanges.append(predicate)
-        }
-        
-        // Объединяем все интервалы
-        let compoundPredicate = NSCompoundPredicate(orPredicateWithSubpredicates: dateRanges)
-        
-        // Настраиваем запрос с фильтром по дате
-        let fetchOptions = PHFetchOptions()
-        fetchOptions.predicate = compoundPredicate
-        fetchOptions.sortDescriptors = [
-            NSSortDescriptor(key: "creationDate", ascending: false)
-        ]
 
-        let assets = PHAsset.fetchAssets(with: fetchOptions)
-        
-        // Список отсортированных фото
-        let alreadySorted = StorageService.shared.sortedPhotoIDs
-        
-        var result: [PhotoItem] = []
-        
-        assets.enumerateObjects { asset, _, _ in
-            guard let date = asset.creationDate else { return }
-            
-            // Пропускаем уже обработанные
-            guard !alreadySorted.contains(asset.localIdentifier) else { return }
-            
-            let item = PhotoItem(
-                id: asset.localIdentifier,
-                asset: asset,
-                creationDate: date
-            )
-            result.append(item)
-        }
-        
-        return result
-    }
-    
-    // MARK: - Поиск фото для конкретной даты (без фильтрации по обработанным)
+        // Возвращает ВСЕ фото за указанный (месяц, день) по всем годам в пределах
+        // yearsBack. Никакой фильтрации по «уже обработанным» — глобального пула
+        // больше нет. Единственный фильтр «фото исчезло» обеспечивает сама iOS:
+        // удалённый asset не вернётся из fetchAssets.
+        //
+        // Почему month/day компонентами, а не Date: сортируемый день у нас живёт
+        // как selectedMonth/selectedDay (без года). Передавать Date пришлось бы
+        // с искусственным годом, а 29 февраля в невисокосный год из Date не
+        // собирается. Компоненты снимают эту проблему на входе.
+        func fetchPhotos(month: Int, day: Int) async -> [PhotoItem] {
+            let calendar = Calendar.current
+            let currentYear = calendar.component(.year, from: Date())
 
-    // Возвращает ВСЕ фото за "этот день прошлых лет" для указанной даты,
-    // включая уже отсортированные. В отличие от fetchPhotosForToday не
-    // исключает ничего из storage.sortedPhotoIDs.
-    //
-    // Используется в SortingView чтобы:
-    //   1. Знать полное количество фото за день (для прогресс-бара).
-    //   2. Восстанавливать currentIndex по swipeLog после переоткрытия.
-    //   3. Дать кнопке "назад" доступ к уже свайпнутым фото.
-    //
-    // Параметр date — любой день (сегодня или из календаря в будущем).
-    func fetchAllPhotos(for date: Date) async -> [PhotoItem] {
-        let calendar = Calendar.current
-        
-        let month = calendar.component(.month, from: date)
-        let day = calendar.component(.day, from: date)
-        let currentYear = calendar.component(.year, from: Date())
-        
-        // Собираем интервалы дат для каждого года
-        var dateRanges: [NSPredicate] = []
-        
-        for year in (currentYear - yearsBack)...currentYear {
-            var components = DateComponents()
-            components.year = year
-            components.month = month
-            components.day = day
-            components.hour = 0
-            components.minute = 0
-            components.second = 0
-            
-            guard let startDate = calendar.date(from: components) else { continue }
-            guard let endDate = calendar.date(byAdding: .day, value: 1, to: startDate) else { continue }
-            
-            let predicate = NSPredicate(
-                format: "creationDate >= %@ AND creationDate < %@",
-                startDate as NSDate,
-                endDate as NSDate
-            )
-            dateRanges.append(predicate)
+            var dateRanges: [NSPredicate] = []
+
+            for year in (currentYear - yearsBack)...currentYear {
+                var components = DateComponents()
+                components.year = year
+                components.month = month
+                components.day = day
+                components.hour = 0
+                components.minute = 0
+                components.second = 0
+
+                guard let startDate = calendar.date(from: components) else { continue }
+
+                // GUARD 29 февраля: для невисокосного года Calendar.date(from:)
+                // НЕ вернёт nil, а молча нормализует "29 февраля" в "1 марта".
+                // Без этой проверки выбор 29 февраля подтянул бы мартовские фото.
+                // Убеждаемся, что собранная дата реально имеет нужные месяц и день;
+                // если Calendar их "поправил" — пропускаем этот год.
+                let check = calendar.dateComponents([.month, .day], from: startDate)
+                guard check.month == month, check.day == day else { continue }
+
+                guard let endDate = calendar.date(byAdding: .day, value: 1, to: startDate) else { continue }
+
+                let predicate = NSPredicate(
+                    format: "creationDate >= %@ AND creationDate < %@",
+                    startDate as NSDate,
+                    endDate as NSDate
+                )
+                dateRanges.append(predicate)
+            }
+
+            let compoundPredicate = NSCompoundPredicate(orPredicateWithSubpredicates: dateRanges)
+
+            let fetchOptions = PHFetchOptions()
+            fetchOptions.predicate = compoundPredicate
+            fetchOptions.sortDescriptors = [
+                NSSortDescriptor(key: "creationDate", ascending: false)
+            ]
+
+            let assets = PHAsset.fetchAssets(with: fetchOptions)
+
+            var result: [PhotoItem] = []
+
+            assets.enumerateObjects { asset, _, _ in
+                guard let creationDate = asset.creationDate else { return }
+                let item = PhotoItem(
+                    id: asset.localIdentifier,
+                    asset: asset,
+                    creationDate: creationDate
+                )
+                result.append(item)
+            }
+
+            return result
         }
-        
-        let compoundPredicate = NSCompoundPredicate(orPredicateWithSubpredicates: dateRanges)
-        
-        let fetchOptions = PHFetchOptions()
-        fetchOptions.predicate = compoundPredicate
-        fetchOptions.sortDescriptors = [
-            NSSortDescriptor(key: "creationDate", ascending: false)
-        ]
-        
-        let assets = PHAsset.fetchAssets(with: fetchOptions)
-        
-        var result: [PhotoItem] = []
-        
-        assets.enumerateObjects { asset, _, _ in
-            guard let creationDate = asset.creationDate else { return }
-            
-            let item = PhotoItem(
-                id: asset.localIdentifier,
-                asset: asset,
-                creationDate: creationDate
-            )
-            result.append(item)
-        }
-        
-        return result
-    }
     
     // MARK: - Загрузка изображения (async с кэшем)
 

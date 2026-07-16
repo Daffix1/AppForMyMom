@@ -16,10 +16,6 @@ final class StorageService {
         
         self.onboardingCompleted = defaults.bool(forKey: Keys.onboardingCompleted)
         
-        // Множество строк
-        let array = defaults.stringArray(forKey: Keys.sortedPhotoIDs) ?? []
-        self.sortedPhotoIDs = Set(array)
-        
         // Сессия (JSON-decoded)
         if let data = defaults.data(forKey: Keys.currentSession),
            let session = try? JSONDecoder().decode(DailySessionState.self, from: data),
@@ -49,8 +45,6 @@ final class StorageService {
     // MARK: - Ключи
     
     private enum Keys {
-        // Пул необработанных
-        static let sortedPhotoIDs = "sortedPhotoIDs"
         
         // Статистика «удалено»
         static let totalDeletedPhotos = "totalDeletedPhotos"
@@ -102,14 +96,6 @@ final class StorageService {
         }
     }
     
-    // Множество ID всех когда-либо обработанных фото, для фильтрации в галерее
-    // Чтобы не показывать пользователю то что он уже видел в прошлые дни
-    var sortedPhotoIDs: Set<String> {
-        didSet {
-            defaults.set(Array(sortedPhotoIDs), forKey: Keys.sortedPhotoIDs)
-        }
-    }
-    
     // MARK: - Настройки
     
     var onboardingCompleted: Bool {
@@ -123,24 +109,19 @@ final class StorageService {
             defaults.set(hapticsEnabled, forKey: Keys.hapticsEnabled)
         }
     }
-    
+
     func ensureFreshSession() {
-        // Если сессия уже сегодняшняя — ничего не делаем
         guard !currentSession.isToday else { return }
-        
-        // не прерываем пока чел сортирует или на финальной стадии
-        let activePhases: [DailySessionState.Phase] = [.sorting, .awaitingDecision]
-        if activePhases.contains(currentSession.phase) {
-            return
-        }
-        
         currentSession = DailySessionState.newToday()
+    }
+    
+    func selectSortingDay(_ sortingDay: Date) {
+        currentSession = DailySessionState.newSession(livesOn: Date(), sorting: sortingDay)
     }
     
     // MARK: - Сброс (для отладки)
     
     func resetAll() {
-        defaults.removeObject(forKey: Keys.sortedPhotoIDs)
         defaults.removeObject(forKey: Keys.totalDeletedPhotos)
         defaults.removeObject(forKey: Keys.totalDeletedVideos)
         defaults.removeObject(forKey: Keys.totalFreedBytes)
@@ -153,7 +134,6 @@ final class StorageService {
         totalDeletedVideos = 0
         totalFreedBytes = 0
         onboardingCompleted = false
-        sortedPhotoIDs = []
         currentSession = DailySessionState.newToday()
         hapticsEnabled = true
     }

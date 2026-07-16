@@ -53,22 +53,28 @@ struct DailySessionState: Codable {
     // Используется для восстановления состояния SortingView после
     // повторного открытия и для работы кнопки "назад".
     var swipeLog: [SwipeEntry]
-    
-    // MARK: - Codable: ручной декодер с дефолтами для новых полей
-    
-    // Проблема: когда пользователь обновит приложение, в UserDefaults
-    // уже лежит JSON старой сессии БЕЗ поля swipeLog. По умолчанию
-    // JSONDecoder бросит ошибку и сессия не загрузится — потеряется
-    // прогресс за сегодня.
+        
+    // MARK: - Сортируемый день (число + месяц, БЕЗ года)
     //
-    // Решение: пишем свой init(from:) который для отсутствующих полей
-    // подставляет пустые значения. Декодеру всё равно есть поле или нет.
+    // Какой календарный день пользователь сортирует: 7 июля → (month: 7, day: 7).
+    // Год намеренно не храним — механика "этот день во всех прошлых годах"
+    // ищет фото по (месяц, день) сразу по всем годам.
     //
-    // CodingKeys — это enum со всеми именами полей. Нужен для ручного
-    // декодера: говорит "вот эти строки ищи в JSON".
+    // Почему компонентами Int, а не Date: Date без года не существует, а с
+    // годом 29 февраля в невисокосный год не создаётся корректно. Отдельные
+    // month/day хранят намерение пользователя чисто, независимо от високосности.
+    //
+    // ВАЖНО: это НЕ то же самое, что поле date. date — календарный день,
+    // к которому привязана сессия (по нему работает полуночный сброс, isToday).
+    // selectedMonth/Day — какой день СОРТИРУЕМ. Для сегодняшней сессии они
+    // совпадают; для дня, выбранного в календаре, разойдутся (это сделаем позже).
+    var selectedMonth: Int
+    var selectedDay: Int
+    
     private enum CodingKeys: String, CodingKey {
         case date, phase, processedIDs, pendingDeleteIDs,
-             currentDeletedIDs, currentKeptIDs, swipeLog
+             currentDeletedIDs, currentKeptIDs, swipeLog,
+             selectedMonth, selectedDay
     }
     
     init(from decoder: Decoder) throws {
@@ -87,6 +93,10 @@ struct DailySessionState: Codable {
         // decodeIfPresent возвращает nil если ключа нет (вместо ошибки)
         // ?? [] подставляет пустой массив как дефолт
         self.swipeLog = try c.decodeIfPresent([SwipeEntry].self, forKey: .swipeLog) ?? []
+        
+        let today = Calendar.current.dateComponents([.month, .day], from: Date())
+        self.selectedMonth = try c.decodeIfPresent(Int.self, forKey: .selectedMonth) ?? (today.month ?? 1)
+        self.selectedDay = try c.decodeIfPresent(Int.self, forKey: .selectedDay) ?? (today.day ?? 1)
     }
     
     // MARK: - Обычный init (нужен потому что мы написали свой init(from:))
@@ -101,7 +111,9 @@ struct DailySessionState: Codable {
         pendingDeleteIDs: [String],
         currentDeletedIDs: [String],
         currentKeptIDs: [String],
-        swipeLog: [SwipeEntry]
+        swipeLog: [SwipeEntry],
+        selectedMonth: Int,
+        selectedDay: Int
     ) {
         self.date = date
         self.phase = phase
@@ -110,6 +122,8 @@ struct DailySessionState: Codable {
         self.currentDeletedIDs = currentDeletedIDs
         self.currentKeptIDs = currentKeptIDs
         self.swipeLog = swipeLog
+        self.selectedMonth = selectedMonth
+        self.selectedDay = selectedDay
     }
     
     // MARK: - Удобные вычисляемые свойства
@@ -127,22 +141,27 @@ struct DailySessionState: Codable {
     
     // MARK: - Создание новой сессии
     
-    // Пустая сессия для ЛЮБОЙ даты — общая фабрика.
-    // Используется и для сегодня, и для дней из календаря.
-    static func newSession(for date: Date) -> DailySessionState {
-        DailySessionState(
-            date: date,
+    // Пустая сессия. Разводим две даты:
+    //   livesOn — календарный день, В КОТОРЫЙ живёт сессия. По нему работает
+    //             полуночный сброс (isToday). Обычно это Date() — сегодня.
+    //   sorting — какой день СОРТИРУЕМ (число+месяц). Для сегодняшней сортировки
+    //             совпадает с livesOn; для дня из календаря — отличается.
+    static func newSession(livesOn: Date, sorting: Date) -> DailySessionState {
+        let comps = Calendar.current.dateComponents([.month, .day], from: sorting)
+        return DailySessionState(
+            date: livesOn,
             phase: .idle,
             processedIDs: [],
             pendingDeleteIDs: [],
             currentDeletedIDs: [],
             currentKeptIDs: [],
-            swipeLog: []
+            swipeLog: [],
+            selectedMonth: comps.month ?? 1,
+            selectedDay: comps.day ?? 1
         )
     }
-        
-        // Пустая сессия для сегодня — удобная обёртка над newSession(for:).
-        static func newToday() -> DailySessionState {
-            newSession(for: Date())
-        }
+
+    static func newToday() -> DailySessionState {
+        newSession(livesOn: Date(), sorting: Date())
+    }
 }

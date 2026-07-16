@@ -4,37 +4,30 @@ import Photos
 @MainActor
 struct MainScreenView: View {
     private var photoService = PhotoLibraryService.shared
-    
+
     @State private var state: ScreenState = .loading
     @State private var photos: [PhotoItem] = []
     @State private var sortingPayload: SortingSessionPayload?
-    
+
     @State private var showStats = false
     @State private var showSettings = false
     @State private var showCalendar = false
-    
+
     @State private var autoStartAfterDismiss = false
-    
-    // Wrapper for the data fullScreenCover(item:) hands off to SortingView.
-    // Using item: instead of isPresented: guarantees SwiftUI has the full
-    // payload in place before it constructs the SortingView body.
+
+    // Обёртка для данных, которые fullScreenCover(item:) передаёт в SortingView.
+    // item: (а не isPresented:) гарантирует, что SwiftUI получил полный payload
+    // до конструирования тела SortingView.
     //
-    // Теперь payload несёт не только фото, но и sessionStore. Причина:
-    // стор бывает разный (TodaySessionStore для сегодня, EphemeralSessionStore
-    // для дня из календаря), и его нужно создать РОВНО ОДИН РАЗ и передать в
-    // SortingView. Если бы стор создавался в замыкании fullScreenCover, при
-    // каждой перерисовке возникал бы новый пустой стор и прогресс эфемерного
-    // дня терялся бы. Кладя стор в payload, фиксируем один экземпляр на сессию.
-    
+    // Стор из payload убран: сессия снова одна (storage.currentSession),
+    // SortingView читает её напрямую. Достаточно передать фото.
     private struct SortingSessionPayload: Identifiable {
         let id = UUID()
         let photos: [PhotoItem]
-        let sessionStore: SessionStore
     }
-    
-    // Прямой доступ к реактивному singleton'у
+
     private let storage = StorageService.shared
-    
+
     var body: some View {
         Group {
             if !storage.onboardingCompleted {
@@ -46,11 +39,11 @@ struct MainScreenView: View {
             }
         }
     }
-    
+
     private var mainContent: some View {
         ZStack {
             Color(.systemGroupedBackground).ignoresSafeArea()
-            
+
             VStack {
                 switch state {
                 case .loading:        loadingView
@@ -109,7 +102,6 @@ struct MainScreenView: View {
         }) { payload in
             SortingView(
                 photos: payload.photos,
-                sessionStore: payload.sessionStore,
                 onFinish: { sortingPayload = nil },
                 onContinueRequested: {
                     autoStartAfterDismiss = true
@@ -126,16 +118,21 @@ struct MainScreenView: View {
             }
         }
         .sheet(isPresented: $showCalendar) {
-            CalendarView(onDateSelected: { date in
-                // Подключено: выбор даты запускает сортировку за этот день.
-                // launchSorting сам выберет нужный стор по дате.
-                Task { await launchSorting(for: date) }
-            })
+            CalendarView(
+                selectedMonth: storage.currentSession.selectedMonth,
+                selectedDay: storage.currentSession.selectedDay,
+                onDaySelected: { date in
+                    Task {
+                        storage.selectSortingDay(date)
+                        await loadPhotos()
+                    }
+                }
+            )
         }
     }
-    
+
     // MARK: - Состояния
-    
+
     private var loadingView: some View {
         VStack(spacing: 16) {
             ProgressView().scaleEffect(1.4)
@@ -144,13 +141,13 @@ struct MainScreenView: View {
                 .foregroundColor(.secondary)
         }
     }
-    
+
     private var needsAccessView: some View {
         VStack(spacing: 24) {
             Image(systemName: "photo.stack")
                 .font(.system(size: 64))
                 .foregroundColor(.blue)
-            
+
             VStack(spacing: 8) {
                 Text("Photo Sorting")
                     .font(.system(size: 28, weight: .bold))
@@ -159,52 +156,72 @@ struct MainScreenView: View {
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
             }
-            
+
             Spacer().frame(height: 8)
-            
+
             Button("Разрешить доступ к фото") {
                 Task { await loadPhotos() }
             }
             .primaryButtonStyle()
         }
     }
-    
+
     private var accessDeniedView: some View {
         VStack(spacing: 20) {
             Image(systemName: "lock.fill")
                 .font(.system(size: 56))
                 .foregroundColor(.orange)
-            
+
             Text("Доступ к фото запрещён")
                 .font(.system(size: 22, weight: .bold))
                 .multilineTextAlignment(.center)
-            
+
             Text("Откройте Настройки → Photo Sorting → Фото и выберите «Все фото».")
                 .font(.system(size: 15))
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
-            
+
             Button("Открыть настройки") {
                 openSettings()
             }
             .primaryButtonStyle()
         }
     }
-    
+
     private var readyView: some View {
         VStack(spacing: 0) {
             Spacer()
-            
+
             VStack(spacing: 8) {
-                Text(todayDateString())
-                    .font(.system(size: 32, weight: .bold))
-                Text("Этот день в прошлые годы")
-                    .font(.system(size: 15))
-                    .foregroundColor(.secondary)
-            }
-            
+                            Button {
+                                HapticsService.shared.play(.light)
+                                showCalendar = true
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Text(selectedDayString())
+                                        .font(.system(size: 28, weight: .bold))
+                                        .foregroundColor(.primary)
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundColor(.blue)
+                                }
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 12)
+                                .background(Color(.secondarySystemGroupedBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(Color.blue.opacity(0.25), lineWidth: 1)
+                                )
+                            }
+                            Text("Этот день во все прошлые годы")
+                                .font(.system(size: 15))
+                                .foregroundColor(.secondary)
+                                .padding(.top, 4)
+                        }
+
             Spacer().frame(height: 60)
-            
+
             VStack(spacing: 6) {
                 Text("\(photos.count)")
                     .font(.system(size: 80, weight: .bold))
@@ -213,16 +230,16 @@ struct MainScreenView: View {
                     .font(.system(size: 17))
                     .foregroundColor(.secondary)
             }
-            
+
             Spacer()
-            
+
             Button(buttonTitleForReady) {
                 Task { await startSorting() }
             }
             .primaryButtonStyle()
         }
     }
-    
+
     private var buttonTitleForReady: String {
         let phase = storage.currentSession.phase
         if phase == .awaitingDecision {
@@ -233,42 +250,59 @@ struct MainScreenView: View {
             return "Начать сортировку"
         }
     }
-    
+
     private var completedTodayView: some View {
-        VStack(spacing: 24) {
-            Text("🎉").font(.system(size: 80))
-            
-            Text("На сегодня всё!")
-                .font(.system(size: 26, weight: .bold))
-            
-            Text("Возвращайтесь завтра в 00:00 за новой порцией фото")
-                .font(.system(size: 15))
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 20)
-            
-            if !photos.isEmpty {
-                Button("Отсортировать оставшееся") {
-                    Task { await startSorting() }
+            VStack(spacing: 24) {
+                Text("🎉").font(.system(size: 80))
+
+                Text(completedTitle)
+                    .font(.system(size: 26, weight: .bold))
+                    .multilineTextAlignment(.center)
+
+                Text(completedSubtitle)
+                    .font(.system(size: 15))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 20)
+
+                if !photos.isEmpty {
+                    Button("Отсортировать оставшееся") {
+                        Task { await startSorting() }
+                    }
+                    .primaryButtonStyle()
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
                 }
-                .primaryButtonStyle()
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
             }
         }
+
+        // Сегодняшний ли день сортируется сейчас — по selectedMonth/Day сессии.
+    private var isSortingToday: Bool {
+        let today = Calendar.current.dateComponents([.month, .day], from: Date())
+        let s = storage.currentSession
+        return s.selectedMonth == today.month && s.selectedDay == today.day
     }
-    
+    private var completedTitle: String {
+        isSortingToday ? "На сегодня всё!" : "День отсортирован"
+    }
+    private var completedSubtitle: String {
+        if isSortingToday {
+            return "Возвращайтесь завтра в 00:00 за новой порцией фото"
+        } else {
+            return "Вы разобрали фото за \(selectedDayString()). Можно выбрать другой день в календаре."
+        }
+    }
+
     // MARK: - Загрузка фото
-    
+
     private func loadPhotos() async {
         state = .loading
-        
-        // Проверяем актуальность сессии — если день сменился и сессия "тихая",
-        // создаётся новая. Активные сессии (sorting/awaitingDecision) не трогаются.
+
+        // Полуночный сброс: сессия не сегодняшняя → пересоздаём на сегодня.
         storage.ensureFreshSession()
-        
+
         let granted = await photoService.requestAuthorization()
-        
+
         if !granted {
             let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
             if status == .denied || status == .restricted {
@@ -278,18 +312,21 @@ struct MainScreenView: View {
             }
             return
         }
-        
-        let foundPhotos = await photoService.fetchPhotosForToday()
-        
-        photos = foundPhotos
+
+        // Выборка по сортируемому дню текущей сессии (пока это всегда сегодня).
         let session = storage.currentSession
-        
+        let foundPhotos = await photoService.fetchPhotos(
+            month: session.selectedMonth,
+            day: session.selectedDay
+        )
+
+        photos = foundPhotos
+
         if session.phase == .completed {
             state = .completedToday
         } else if session.phase == .awaitingDecision {
             state = .ready
         } else if foundPhotos.isEmpty {
-            // Фото за сегодня нет — помечаем день завершённым
             var updated = storage.currentSession
             updated.phase = .completed
             storage.currentSession = updated
@@ -298,54 +335,47 @@ struct MainScreenView: View {
             state = .ready
         }
     }
-    
+
     // MARK: - Запуск сортировки
-    
-    // Единая точка входа в сортировку за ЛЮБОЙ день.
-    //
-    //   - Выбирает стор по дате: сегодня → TodaySessionStore (персист + resume),
-    //     прошлый день → EphemeralSessionStore (в памяти, разовая сессия).
-    //   - Грузит фото за этот день через fetchAllPhotos(for:).
-    //   - Кладёт фото И стор в payload (стор создаётся здесь ровно один раз).
-    //
-    // И кнопка с главного экрана, и колбэк из календаря идут через этот метод —
-    // логика выбора стора живёт в одном месте.
-    private func launchSorting(for date: Date) async {
-        let store: SessionStore
-        if Calendar.current.isDateInToday(date) {
-            // Сегодня — всегда через TodaySessionStore, независимо от того,
-            // откуда зашли (главный экран или календарь). Это гарантирует
-            // ЕДИНУЮ сегодняшнюю сессию с одним прогрессом.
-            store = TodaySessionStore()
-        } else {
-            // Прошлый день — эфемерная сессия в памяти.
-            store = EphemeralSessionStore(date: date)
-        }
-        
-        let dayPhotos = await photoService.fetchAllPhotos(for: date)
-        
-        // Setting this single piece of state both triggers the cover AND
-        // hands SwiftUI the photos array + store atomically.
-        sortingPayload = SortingSessionPayload(photos: dayPhotos, sessionStore: store)
-    }
-    
-    // Запуск сегодняшней сортировки — тонкая обёртка над launchSorting.
-    // Берём дату из текущей сессии (она сегодняшняя), чтобы поведение
-    // совпадало с прежним startSorting.
+
+    // Запуск сортировки за текущий день сессии. Фото грузятся по
+    // selectedMonth/selectedDay. Стор больше не создаём — SortingView
+    // работает напрямую со storage.currentSession.
     private func startSorting() async {
-        await launchSorting(for: storage.currentSession.date)
+        let session = storage.currentSession
+        let dayPhotos = await photoService.fetchPhotos(
+            month: session.selectedMonth,
+            day: session.selectedDay
+        )
+        sortingPayload = SortingSessionPayload(photos: dayPhotos)
     }
-    
+
     // MARK: - Прочее
-    
+
     private func openSettings() {
         if let url = URL(string: UIApplication.openSettingsURLString) {
             UIApplication.shared.open(url)
         }
     }
-    
+
     private func todayDateString() -> String {
         Date().formatted(.dateTime.day().month(.wide))
+    }
+    
+    private func selectedDayString() -> String {
+        let session = storage.currentSession
+        let month = session.selectedMonth
+        let day = session.selectedDay
+
+        // Родительный падеж месяца ("июля", "февраля") — форма для "7 июля".
+        // monthSymbols в русской локали даёт именно склоняемую форму для
+        // конструкции "<число> <месяца>".
+        let symbols = DateFormatter().monthSymbols ?? []
+        guard month >= 1, month <= symbols.count else {
+            return todayDateString()
+        }
+        let monthName = symbols[month - 1]
+        return "\(day) \(monthName)"
     }
 }
 
