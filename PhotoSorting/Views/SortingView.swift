@@ -66,14 +66,18 @@ struct SortingView: View {
             reconstructStateFromLog()
             preloadNextPhotos()
             prepareHaptics()
-        }
-        .task(id: sessionFinished) {
-            if sessionFinished {
-                remainingPhotos = await calculateRemaining()
-                estimatedFreedBytes = estimatePendingFreedBytes()
+            
+            if session.phase == .awaitingDecision {
+                sessionFinished = true
             }
         }
-    }
+            .task(id: sessionFinished) {
+                if sessionFinished {
+                    remainingPhotos = await calculateRemaining()
+                    estimatedFreedBytes = estimatePendingFreedBytes()
+                }
+            }
+        }
 
     private func prepareHaptics() {
         // Warm up the haptic engines so the first swipe feels instant.
@@ -250,6 +254,7 @@ struct SortingView: View {
             keptCount: session.keptCount,
             remainingCount: remainingPhotos,
             estimatedFreedBytes: estimatedFreedBytes,
+            trashAssets: pendingAssets(),
             onDeleteAndExit: {
                 Task { await deleteAndExit() }
             },
@@ -261,6 +266,8 @@ struct SortingView: View {
             },
             onExitWithoutDeleting: {
                 exitWithoutDeleting()
+            },
+            onRestore: { id in restoreFromTrash(id: id)
             }
         )
     }
@@ -505,6 +512,33 @@ struct SortingView: View {
             sum + PhotoLibraryService.estimateSize(for: asset)
         }
     }
+    
+    private func restoreFromTrash(id: String) {
+        // Убираем из буферов удаления
+        if let idx = session.pendingDeleteIDs.firstIndex(of: id) {
+            session.pendingDeleteIDs.remove(at: idx)
+        }
+        if let idx = session.currentDeletedIDs.firstIndex(of: id) {
+            session.currentDeletedIDs.remove(at: idx)
+        }
+        // Делаем оставленным (если ещё не там — на всякий случай без дублей)
+        if !session.currentKeptIDs.contains(id) {
+            session.currentKeptIDs.append(id)
+        }
+        // Переводим запись в журнале свайпов с .left на .right
+        if let idx = session.swipeLog.firstIndex(where: {
+            $0.photoID == id && $0.direction == .left
+        }) {
+            let old = session.swipeLog[idx]
+            session.swipeLog[idx] = DailySessionState.SwipeEntry(
+                photoID: old.photoID,
+                direction: .right
+            )
+        }
+        storage.currentSession = session
+        estimatedFreedBytes = estimatePendingFreedBytes()
+        }
+
 
     // Сколько фото за выбранный день ещё несвайпнуты.
     //
@@ -529,14 +563,17 @@ struct SessionFinishedView: View {
     let keptCount: Int
     let remainingCount: Int
     let estimatedFreedBytes: Int64
+    let trashAssets: [PHAsset]
 
     let onDeleteAndExit: () -> Void
     let onContinueWithRemaining: () -> Void
     let onStartOver: () -> Void
     let onExitWithoutDeleting: () -> Void
+    let onRestore: (String) -> Void
 
     @State private var showStartOverConfirm = false
     @State private var showContinueConfirm = false
+    @State private var showTrashReview = false
 
     private var hasDeletions: Bool { deletedCount > 0 }
     private var hasKept: Bool { keptCount > 0 }
@@ -573,6 +610,9 @@ struct SessionFinishedView: View {
         } message: {
             Text("Перед продолжением сортировки нужно удалить \(deletedCount) \(deletedCount.fileWordFinal()) в корзину. Это действие нельзя отменить.")
         }
+        .sheet(isPresented: $showTrashReview) {
+                    TrashReviewView(assets: trashAssets, onRestore: onRestore)
+                }
     }
 
     private var freedSpaceBlock: some View {
@@ -635,6 +675,15 @@ struct SessionFinishedView: View {
                     Button("Удалить и продолжить") { showContinueConfirm = true }
                         .secondaryButtonStyle()
                 }
+                
+                Button {
+                                    showTrashReview = true
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "eye")
+                                        Text("Просмотреть удалённые")
+                                    }
+                                }
             } else {
                 Button("Готово") { onExitWithoutDeleting() }
                     .primaryButtonStyle()

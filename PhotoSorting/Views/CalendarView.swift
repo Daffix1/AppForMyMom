@@ -12,6 +12,14 @@ struct CalendarView: View {
     @State private var displayedMonth: Int
     @State private var isMovingForward = true
 
+    // День, только что тапнутый пользователем — для анимации подсветки
+    // перед закрытием календаря. Имеет ВЫСШИЙ приоритет над isSelected
+    // (старый выбор) и isToday. nil, пока ничего не тапнули в этой сессии.
+    @State private var justTappedDay: Int?
+    // Блокирует повторные тапы, пока идёт анимация выбора и пауза перед
+    // закрытием (иначе можно тапнуть второй день за время паузы).
+    @State private var isSelecting = false
+
     init(selectedMonth: Int, selectedDay: Int, onDaySelected: @escaping (Date) -> Void) {
         self.selectedMonth = selectedMonth
         self.selectedDay = selectedDay
@@ -29,6 +37,17 @@ struct CalendarView: View {
 
     private var daysInDisplayedMonth: Int {
         daysPerMonth[displayedMonth - 1]
+    }
+
+    // Компоненты «сегодня». Сравниваем ТОЛЬКО целые числа — никакого
+    // конструирования Date для сравнения, чтобы не нарваться на
+    // нормализацию 29 февраля в невисокосный год.
+    private var todayMonth: Int {
+        Calendar.current.component(.month, from: Date())
+    }
+
+    private var todayDay: Int {
+        Calendar.current.component(.day, from: Date())
     }
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 7)
@@ -70,17 +89,38 @@ struct CalendarView: View {
 
                 LazyVGrid(columns: columns, spacing: 8) {
                     ForEach(1...daysInDisplayedMonth, id: \.self) { day in
-                        let isSelected = (day == selectedDay && displayedMonth == selectedMonth)
+                        // Только что тапнутый день (в текущем показанном месяце)
+                        // — высший приоритет: это активный выбор пользователя.
+                        let isTapped = (justTappedDay == day)
+                        // Старый выбранный день. ВАЖНО: как только пользователь
+                        // тапнул новый день (justTappedDay != nil), старое
+                        // выделение гасим — иначе на экране два синих числа.
+                        let isSelected = (justTappedDay == nil)
+                            && (day == selectedDay && displayedMonth == selectedMonth)
+                        // Заливка (синий фон) — либо тапнутый сейчас, либо
+                        // ранее выбранный день (пока не тапнули новый).
+                        let isFilled = isTapped || isSelected
+                        // «Сегодня» показываем только если день НЕ залит —
+                        // заливка имеет приоритет над обводкой сегодня.
+                        let isToday = (day == todayDay && displayedMonth == todayMonth) && !isFilled
                         Button {
                             selectDay(day)
                         } label: {
                             Text("\(day)")
-                                .font(.system(size: 17, weight: isSelected ? .semibold : .regular))
-                                .foregroundColor(isSelected ? .white : .primary)
+                                .font(.system(size: 17, weight: (isFilled || isToday) ? .semibold : .regular))
+                                .foregroundColor(isFilled ? .white : (isToday ? .blue : .primary))
                                 .frame(maxWidth: .infinity, minHeight: 44)
-                                .background(isSelected ? Color.blue : Color(.secondarySystemGroupedBackground))
+                                .background(isFilled ? Color.blue : Color(.secondarySystemGroupedBackground))
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .overlay {
+                                    // Обводка для сегодня (когда он не залит)
+                                    if isToday {
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(Color.blue, lineWidth: 2)
+                                    }
+                                }
                         }
+                        .disabled(isSelecting)
                     }
                 }
                 .padding(.horizontal, 12)
@@ -113,6 +153,10 @@ struct CalendarView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Закрыть") { dismiss() }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Сегодня") { goToToday() }
+                        .disabled(isSelecting)
+                }
             }
         }
     }
@@ -129,27 +173,80 @@ struct CalendarView: View {
         }
     }
 
-    private func selectDay(_ day: Int) {
-        var components = DateComponents()
-        components.month = displayedMonth
-        components.day = day
+    // MARK: - Переход на сегодня
+    //
+    // Вариант Б: сначала анимированно перелистываем календарь на текущий
+    // месяц, даём анимации отыграть, затем выбираем сегодняшнее число
+    // через существующий selectDay (он найдёт валидный Date, дёрнет
+    // onDaySelected и закроет календарь).
+    private func goToToday() {
+        guard !isSelecting else { return }
 
+        // Уже на текущем месяце — листать нечего, сразу выбираем.
+        guard displayedMonth != todayMonth else {
+            selectDay(todayDay)
+            return
+        }
+
+        HapticsService.shared.play(.light)
+
+        // Направление анимации по кратчайшему пути на кольце из 12 месяцев:
+        // вперёд, если до текущего месяца ближе «по возрастанию».
+        let forwardSteps = ((todayMonth - displayedMonth) + 12) % 12
+        isMovingForward = forwardSteps <= 6
+
+        withAnimation(.easeInOut(duration: 0.25)) {
+            displayedMonth = todayMonth
+        }
+
+        // Пауза, чтобы переход месяца был виден до закрытия календаря.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            selectDay(todayDay)
+        }
+    }
+
+    private func selectDay(_ day: Int) {
+        // Защита от повторного тапа во время анимации/паузы.
+        guard !isSelecting else { return }
+
+        // Ищем валидный Date для (displayedMonth, day) в ближайших годах.
+        // Делаем это ДО подсветки: если дата почему-то не собирается,
+        // просто закрываемся без ложной анимации выбора.
         let calendar = Calendar.current
         let currentYear = calendar.component(.year, from: Date())
 
+        var resolvedDate: Date?
         for year in stride(from: currentYear, through: currentYear - 8, by: -1) {
-            var c = components
+            var c = DateComponents()
+            c.month = displayedMonth
+            c.day = day
             c.year = year
             if let date = calendar.date(from: c) {
                 let check = calendar.dateComponents([.month, .day], from: date)
                 if check.month == displayedMonth, check.day == day {
-                    onDaySelected(date)
-                    dismiss()
-                    return
+                    resolvedDate = date
+                    break
                 }
             }
         }
-        dismiss()
+
+        guard let date = resolvedDate else {
+            dismiss()
+            return
+        }
+
+        // Фаза 1: подсвечиваем тапнутый день (синяя заливка) с анимацией.
+        isSelecting = true
+        HapticsService.shared.play(.medium)
+        withAnimation(.easeOut(duration: 0.15)) {
+            justTappedDay = day
+        }
+
+        // Фаза 2: пауза, чтобы подсветку было видно, затем выбор и закрытие.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            onDaySelected(date)
+            dismiss()
+        }
     }
 }
 
